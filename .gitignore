@@ -1,5 +1,10 @@
 node_modules/
 dist/
-hermes-android/
+build/
+.gradle/
 *.apk
 *.aab
+*.so
+*.dex
+hermes-android/
+local.properties
