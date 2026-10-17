@@ -4,7 +4,7 @@ build/
 .gradle/
 *.apk
 *.aab
-*.so
-*.dex
+*.png
+*.jpg
+*.jpeg
 hermes-android/
-local.properties
