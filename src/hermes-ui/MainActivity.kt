@@ -1,0 +1,2412 @@
+package com.hermeswebui.android
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.DownloadManager
+import android.app.AlertDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.os.Message
+import android.os.SystemClock
+import android.provider.Settings
+import android.view.MotionEvent
+import android.view.WindowManager
+import android.webkit.ClientCertRequest
+import android.webkit.CookieManager
+import android.webkit.PermissionRequest
+import android.webkit.ServiceWorkerController
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
+import androidx.browser.customtabs.CustomTabColorSchemeParams
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import androidx.core.content.FileProvider
+import androidx.core.app.NotificationCompat
+import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.ViewModelProvider
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import com.hermeswebui.android.background.DebugLogBootstrap
+import com.hermeswebui.android.background.HermesForegroundServiceCoordinator
+import com.hermeswebui.android.core.security.NavigationDecision
+import com.hermeswebui.android.core.security.UrlOrigins
+import com.hermeswebui.android.core.security.UrlPolicy
+import com.hermeswebui.android.core.security.WebTrustPolicy
+import com.hermeswebui.android.data.DiagnosticsLogger
+import com.hermeswebui.android.data.HermesApiClient
+import com.hermeswebui.android.data.ServerProfile
+import com.hermeswebui.android.data.SettingsRepository
+import com.hermeswebui.android.notification.HermesNotificationBridgeCoordinator
+import com.hermeswebui.android.security.ClientCertificateRequestSupport
+import com.hermeswebui.android.notification.HermesNotificationPresenter
+import com.hermeswebui.android.domain.ServerUrlValidator
+import com.hermeswebui.android.server.HermesServerProfileCoordinator
+import com.hermeswebui.android.server.SelectedServerNavigation
+import com.hermeswebui.android.domain.ShareIntentParser
+import com.hermeswebui.android.domain.TailscaleEndpointDetector
+import com.hermeswebui.android.ui.MainViewModel
+import com.hermeswebui.android.ui.MainViewModelFactory
+import com.hermeswebui.android.ui.DebugLogFloatingOverlay
+import com.hermeswebui.android.ui.settings.SettingsScreen
+import com.hermeswebui.android.ui.settings.VpnLaunchAppOption
+import com.hermeswebui.android.ui.web.WebShell
+import com.hermeswebui.android.webui.HermesWebUiScripts
+import com.hermeswebui.android.webui.VoiceCaptureLifecycleGate
+import com.hermeswebui.android.webview.HermesMediaPlaybackPolicy
+import com.hermeswebui.android.webview.HermesWebViewConfigurator
+import com.hermeswebui.android.webview.HermesWebViewDownloadListener
+import com.hermeswebui.android.update.HermesAppUpdateCoordinator
+import com.google.android.play.core.appupdate.AppUpdateManager
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.File
+import java.net.InetAddress
+
+private const val HermesNotificationBridgeName = "HermesAndroidNotifications"
+private const val HermesNotificationChannelId = "hermes_webui_notifications"
+private const val HermesNotificationIdBase = 10_000
+private const val HermesVpnReconnectNotificationId = 9_900
+private const val HermesGithubIssuesListUrl = "https://github.com/hermes-webui/hermes-android/issues"
+private const val HermesGithubNewIssueUrl = "https://github.com/hermes-webui/hermes-android/issues/new/choose"
+private const val TailscaleAndroidPackage = "com.tailscale.ipn"
+private const val TailscaleConnectVpnAction = "com.tailscale.ipn.CONNECT_VPN"
+private const val VpnReconnectPollIntervalMs = 1_000L
+private const val TailscaleAutoConnectFallbackMs = 10_000L
+private const val EnableAppSettingsSidebarShim = true
+
+private val HermesDarkColorScheme = darkColorScheme(
+    primary = Color(0xFFFFD700),
+    onPrimary = Color(0xFF16110A),
+    primaryContainer = Color(0xFF4A3800),
+    onPrimaryContainer = Color(0xFFFFDF6B),
+    secondary = Color(0xFF4DD0E1),
+    onSecondary = Color(0xFF061417),
+    background = Color(0xFF0D0D1A),
+    onBackground = Color(0xFFFFF8DC),
+    surface = Color(0xFF141425),
+    onSurface = Color(0xFFFFF8DC),
+    surfaceVariant = Color(0xFF1A1A2E),
+    onSurfaceVariant = Color(0xFFE6E0C8),
+    outline = Color(0xFF5A5A7A),
+    outlineVariant = Color(0xFF3A3A55),
+    error = Color(0xFFEF5350),
+    onError = Color(0xFF1F0505)
+)
+
+private val HermesLightColorScheme = lightColorScheme(
+    primary = Color(0xFF7A5900),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDF6B),
+    onPrimaryContainer = Color(0xFF261A00),
+    secondary = Color(0xFF006874),
+    onSecondary = Color(0xFFFFFFFF),
+    background = Color(0xFFFFFBF0),
+    onBackground = Color(0xFF1C1B00),
+    surface = Color(0xFFFFF8F2),
+    onSurface = Color(0xFF1C1B00),
+    surfaceVariant = Color(0xFFEEEAD8),
+    onSurfaceVariant = Color(0xFF4B4737),
+    outline = Color(0xFF7C7866),
+    outlineVariant = Color(0xFFCFC9B6),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: MainViewModel
+    private lateinit var webView: WebView
+    private lateinit var settingsRepository: SettingsRepository
+
+    private var urlPolicy = UrlPolicy(emptySet())
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingCameraCaptureUri: Uri? = null
+    private var pendingLocalNetworkPermissionAction: (() -> Unit)? = null
+    private var pendingLocalNetworkPermissionDeniedAction: (() -> Unit)? = null
+    private var viewportFixScriptHandler: ScriptHandler? = null
+    private var pinchZoomScriptHandler: ScriptHandler? = null
+    private var microphoneFallbackScriptHandler: ScriptHandler? = null
+    private var notificationBridgeScriptHandler: ScriptHandler? = null
+    private var routeRecoveryScriptHandler: ScriptHandler? = null
+    private var appSettingsEntryScriptHandler: ScriptHandler? = null
+    private var enterKeyNewlineScriptHandler: ScriptHandler? = null
+    private var suppressClarifyAutofocusScriptHandler: ScriptHandler? = null
+    private var lastVpnLaunchAttemptElapsedMs: Long = 0L
+    private var pendingVpnGuardUrl: String? = null
+    private var vpnReconnectWaitJob: Job? = null
+    private var tailscaleLaunchFallbackJob: Job? = null
+    private var activityVisible = false
+    private lateinit var appUpdateManager: AppUpdateManager
+    private lateinit var appUpdateCoordinator: HermesAppUpdateCoordinator
+    private lateinit var notificationBridgeCoordinator: HermesNotificationBridgeCoordinator
+    private lateinit var notificationPresenter: HermesNotificationPresenter
+    private lateinit var serverProfileCoordinator: HermesServerProfileCoordinator
+    private lateinit var foregroundServiceCoordinator: HermesForegroundServiceCoordinator
+    private val appUpdateDownloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            appUpdateCoordinator.onDownloadComplete(downloadId)
+        }
+    }
+
+    private var activeOAuthPopup: WebView? = null
+    private var activeOAuthFlow: OAuthPopupFlow? = null
+    private var activeMainFrameOAuthFlow: OAuthPopupFlow? = null
+    private var oauthFlowTimeoutMs: Long = 0
+    private val OAUTH_FLOW_TIMEOUT_MS = 5 * 60 * 1000L // 5 minutes
+    private val oauthReturnNavigation = OAuthReturnNavigation()
+
+    // Popups created by onCreateWindow that have not yet been destroyed. A window.open('') that
+    // never navigates never reaches the popup's shouldOverrideUrlLoading/onPageStarted, so it would
+    // otherwise leak its WebView/renderer resources. Tracked so an orphan sweep and destroyPopup()
+    // can clean them up without double-destroying.
+    private val trackedPopups = mutableSetOf<WebView>()
+    private val ORPHAN_POPUP_SWEEP_MS = 15 * 1000L
+
+    private val serverUrlValidator = ServerUrlValidator()
+
+    private var lastBackPressTime: Long = 0
+    private var backPressExitStage: Int = 0
+    private val BACK_PRESS_TIMEOUT_MS = 2000L // 2 seconds
+
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        filePathCallback?.onReceiveValue(uris.takeIf { it.isNotEmpty() }?.toTypedArray())
+        filePathCallback = null
+        pendingCameraCaptureUri = null
+        viewModel.dismissShareBanner()
+    }
+
+    private val cameraCaptureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val resultUri = pendingCameraCaptureUri?.takeIf { success }
+        filePathCallback?.onReceiveValue(resultUri?.let { arrayOf(it) })
+        filePathCallback = null
+        pendingCameraCaptureUri = null
+        viewModel.dismissShareBanner()
+    }
+
+    private val audioPermissionLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val userDenied = voiceCaptureGate.onRecordAudioPromptResult(granted) { request ->
+                isTrustedPermissionOrigin(request.origin)
+            }
+            if (userDenied) {
+                Toast.makeText(this, "Microphone permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    // WebUI owns existing capture/playback. This proposed host signal requires a WebUI consumer.
+    private val voiceCaptureGate: VoiceCaptureLifecycleGate<PermissionRequest> = VoiceCaptureLifecycleGate(
+        grantAudioCapture = { it.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) },
+        denyAudioCapture = { it.deny() },
+        launchRecordAudioPrompt = { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+        signalAppForeground = ::signalAppForegroundToWebUi
+    )
+
+    private val localNetworkPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val onGranted = pendingLocalNetworkPermissionAction
+            val onDenied = pendingLocalNetworkPermissionDeniedAction
+            pendingLocalNetworkPermissionAction = null
+            pendingLocalNetworkPermissionDeniedAction = null
+            if (granted) {
+                onGranted?.invoke()
+            } else {
+                // Only surface the denial toast when there is no best-effort fallback
+                // (i.e. this is the hard-fail WebView error-recovery path). Pre-load
+                // preflight denials on OEM builds that don't expose a real grant toggle
+                // should not produce a visible error because the load will still proceed.
+                if (onDenied == null) {
+                    Toast.makeText(this, "Local network permission denied", Toast.LENGTH_SHORT).show()
+                }
+                onDenied?.invoke()
+            }
+        }
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationBridgeCoordinator.onPermissionResult(granted)
+            val permission = notificationBridgeCoordinator.permissionState()
+            updateWebNotificationPermissionState(permission)
+            if (!granted) {
+                Toast.makeText(this, "Notification permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private val playUpdateLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            if (result.resultCode != RESULT_OK) {
+                Toast.makeText(this, "App update was not completed", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Begin logcat capture to an app-private file BEFORE any other onCreate
+        // work, so a crash or permission denial during startup is still captured.
+        // No-op on release builds. The foreground service (later in onCreate)
+        // takes over long-term ownership and presents the Stop notification.
+        DebugLogBootstrap.startIfDebuggable(applicationContext)
+
+        val defaultUrl = getString(R.string.default_server_url)
+        val defaultDashboardUrl = getString(R.string.default_dashboard_url)
+        settingsRepository = SettingsRepository(applicationContext)
+        appUpdateManager = AppUpdateManagerFactory.create(this)
+        viewModel = ViewModelProvider(
+            this,
+            MainViewModelFactory(settingsRepository, settingsRepository, defaultUrl, defaultDashboardUrl)
+        )[MainViewModel::class.java]
+        notificationPresenter = HermesNotificationPresenter(
+            context = this,
+            channelId = HermesNotificationChannelId,
+            notificationIdBase = HermesNotificationIdBase,
+            isTrustedTarget = ::isTrustedNotificationTarget
+        )
+        notificationBridgeCoordinator = HermesNotificationBridgeCoordinator(
+            context = this,
+            bridgeName = HermesNotificationBridgeName,
+            settingsRepository = settingsRepository,
+            isTrustedSource = ::isTrustedNotificationBridgeSource,
+            showNotification = { payload ->
+                if (webNotificationPermissionState() != "granted") {
+                    false
+                } else {
+                    notificationPresenter.showNotification(
+                        payload = payload,
+                        fallbackTargetUrl = viewModel.uiState.value.currentUrl
+                    )
+                }
+            },
+            requestNotificationPermissionLauncher = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    launchPostNotificationsPermission()
+                }
+            },
+            runOnUiThread = { action -> runOnUiThread(action) }
+        )
+        appUpdateCoordinator = HermesAppUpdateCoordinator(
+            context = this,
+            activityScope = lifecycleScope,
+            settingsRepository = settingsRepository,
+            viewModel = viewModel,
+            appUpdateManager = appUpdateManager,
+            playUpdateLauncher = playUpdateLauncher,
+            updateChannel = BuildConfig.UPDATE_CHANNEL,
+            githubReleasesApiUrl = BuildConfig.GITHUB_RELEASES_API_URL,
+            githubReleasesPageUrl = BuildConfig.GITHUB_RELEASES_PAGE_URL,
+            notificationChannelId = HermesNotificationChannelId,
+            notificationPermissionState = ::webNotificationPermissionState,
+            requestNotificationPermissionIfNeeded = ::requestNotificationPermissionIfNeeded,
+            isActivityVisible = { activityVisible },
+            appVersionName = ::appVersionName
+        )
+        appUpdateCoordinator.cleanupInstalledGitHubUpdateArtifact()
+        ContextCompat.registerReceiver(
+            this,
+            appUpdateDownloadReceiver,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        serverProfileCoordinator = HermesServerProfileCoordinator(
+            context = this,
+            activityScope = lifecycleScope,
+            settingsRepository = settingsRepository,
+            viewModel = viewModel,
+            serverUrlValidator = serverUrlValidator,
+            onOpenInExternalBrowser = ::openInExternalBrowser,
+            onPerformServerProfileSwitch = ::performServerProfileSwitch,
+            onRefreshConfiguredHermes = ::loadServerUrlWithVpnGuard
+        )
+        foregroundServiceCoordinator = HermesForegroundServiceCoordinator(
+            context = this,
+            settingsRepository = settingsRepository,
+            isTrustedNotificationTarget = ::isTrustedNotificationTarget,
+            onCancelAutoRetry = viewModel::cancelAutoRetry,
+            onSetDebugLoggingEnabled = viewModel::setDebugLoggingEnabled
+        )
+        urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
+
+        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        WebView.setWebContentsDebuggingEnabled(isDebuggable)
+        ensureNotificationChannel()
+
+        // Auto-enable debug logging on debuggable builds so tester logs capture from app launch.
+        // Users can still manually toggle this off from Settings → Troubleshooting.
+        if (isDebuggable && !settingsRepository.isDebugLoggingEnabled()) {
+            settingsRepository.setDebugLoggingEnabled(true)
+            viewModel.setDebugLoggingEnabled(true)
+        }
+        applyScreenshotSecurity(settingsRepository.isBlockScreenshotsEnabled())
+        webView = buildWebView()
+        installHermesWebUiDocumentStartFixes(webView, viewModel.uiState.value.settings.serverUrl)
+
+        if (!appUpdateCoordinator.handleIntent(intent)) {
+            handleShareIntent(intent)
+        }
+
+        setContent {
+            AppContent(
+                onReload = { refreshConfiguredHermes() },
+                onOpenExternal = { openInExternalBrowser(viewModel.uiState.value.currentUrl) },
+                onSaveSettings = { serverUrl -> saveSettings(serverUrl) },
+                onRequestExit = { finish() }
+            )
+        }
+
+        lifecycleScope.launch {
+            viewModel.uiState.collect { state ->
+                foregroundServiceCoordinator.onUiStateChanged(
+                    state = state,
+                    activityVisible = activityVisible
+                )
+            }
+        }
+
+        val settings = viewModel.uiState.value.settings
+        if (!settings.isConfigured) {
+            viewModel.openSettings()
+        } else {
+            preflightConfiguredStartupServer(settings.serverUrl)
+            appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (appUpdateCoordinator.handleIntent(intent)) {
+            return
+        }
+        if (notificationPresenter.handleIntent(intent, webView::loadUrl)) {
+            return
+        }
+        if (!handleDeepLink(intent)) {
+            handleShareIntent(intent)
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        activityVisible = true
+        voiceCaptureGate.onStart()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        voiceCaptureGate.onResume()
+        if (::webView.isInitialized) {
+            activityVisible = true
+            viewModel.refreshFeatureFlagsFromRepository()
+            foregroundServiceCoordinator.onActivityResumed()
+            viewModel.onAppForegrounded()
+            updateWebNotificationPermissionState()
+            appUpdateCoordinator.resumePendingGitHubInstallIfReady()
+            viewModel.resumeAutoRetryIfNeeded()
+            startVpnReconnectWaitLoopIfNeeded()
+            appUpdateCoordinator.resumePlayUpdateIfNeeded()
+            appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
+        }
+    }
+
+    override fun onPause() {
+        // Report host state first; stopping existing tracks requires WebUI support.
+        voiceCaptureGate.onPause()
+        if (::webView.isInitialized) {
+            viewModel.onAppBackgrounded()
+            appUpdateCoordinator.stopPendingGitHubDownloadMonitor()
+        }
+        super.onPause()
+        // If OAuth flow has timed out, clean up the popup to prevent resource leaks.
+        cleanupExpiredOAuthPopup()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        activityVisible = false
+        voiceCaptureGate.onStop()
+        appUpdateCoordinator.cancelAutomaticAppUpdateCheck()
+        val state = viewModel.uiState.value
+        foregroundServiceCoordinator.onActivityStopped(state, activityVisible)
+        // Clean up any lingering OAuth popup on app stop.
+        cleanupExpiredOAuthPopup()
+    }
+
+    override fun onDestroy() {
+        stopVpnReconnectWaitLoop()
+        runCatching { unregisterReceiver(appUpdateDownloadReceiver) }
+        super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // The manifest handles keyboard|keyboardHidden without recreating the activity,
+        // so re-sync the hardware-keyboard flag here to cover attach/detach while open.
+        syncHardwareKeyboardState()
+    }
+
+    /** Handles Hermes app deep links.
+     *
+     * hermes://app/settings opens native Android settings. hermes://session/{id}
+     * navigates the WebView to {serverUrl}/session/{id}, the Hermes WebUI
+     * session route (see DeepLinkRoutes).
+     * Returns true if the intent was consumed, false if it should fall through.
+     */
+    private fun handleDeepLink(intent: Intent): Boolean {
+        val data = intent.data ?: return false
+        if (data.scheme != "hermes") return false
+
+        if (data.host == "app" && data.path == "/settings") {
+            viewModel.openSettings()
+            return true
+        }
+
+        if (data.host != "session") return false
+        val sessionId = data.lastPathSegment?.takeIf { it.isNotBlank() } ?: return false
+        val serverUrl = viewModel.uiState.value.settings.serverUrl
+        if (serverUrl.isBlank()) {
+            Toast.makeText(this, "Configure a server URL in Settings first", Toast.LENGTH_LONG).show()
+            viewModel.openSettings()
+            return true
+        }
+        val sessionUrl = DeepLinkRoutes.sessionUrl(serverUrl, sessionId)
+        if (!urlPolicy.isAllowed(sessionUrl)) {
+            Toast.makeText(this, "Session URL is not allowlisted", Toast.LENGTH_LONG).show()
+            return true
+        }
+        loadServerUrlWithVpnGuard(sessionUrl)
+        return true
+    }
+
+    @Composable
+    private fun AppContent(
+        onReload: () -> Unit,
+        onOpenExternal: () -> Unit,
+        onSaveSettings: (String) -> Unit,
+        onRequestExit: () -> Unit
+    ) {
+        val uiState by viewModel.uiState.collectAsState()
+        val serverProfiles by viewModel.serverProfiles.collectAsState()
+        val snackbarHostState = remember { SnackbarHostState() }
+        val vpnLaunchAppOptions = remember(uiState.isSettingsVisible) {
+            if (uiState.isSettingsVisible) discoverLaunchableApps() else emptyList()
+        }
+
+        LaunchedEffect(uiState.pendingShareBanner) {
+            val banner = uiState.pendingShareBanner ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(banner)
+        }
+
+        // Auto-reload when the retry loop detects the server is back.
+        LaunchedEffect(Unit) {
+            viewModel.autoReloadEvent.collect {
+                refreshConfiguredHermes()
+            }
+        }
+
+        BackHandler {
+            when {
+                uiState.isSettingsVisible -> {
+                    backPressExitStage = 0
+                    viewModel.closeSettings()
+                }
+                webView.canGoBack() -> {
+                    backPressExitStage = 0
+                    webView.goBack()
+                }
+                else -> {
+                    val currentTime = System.currentTimeMillis()
+                    val withinWindow = currentTime - lastBackPressTime < BACK_PRESS_TIMEOUT_MS
+
+                    if (!withinWindow) {
+                        backPressExitStage = 0
+                    }
+
+                    when (backPressExitStage) {
+                        0 -> {
+                            // First back press: arm safety flow to open native settings.
+                            backPressExitStage = 1
+                            lastBackPressTime = currentTime
+                            Toast.makeText(this@MainActivity, "Press back again for Application Settings", Toast.LENGTH_SHORT).show()
+                        }
+                        1 -> {
+                            // Second back press: open native settings before allowing exit.
+                            backPressExitStage = 2
+                            lastBackPressTime = currentTime
+                            viewModel.openSettings()
+                            Toast.makeText(this@MainActivity, "Press back again to exit", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            // Third back press within timeout: exit app.
+                            onRequestExit()
+                        }
+                    }
+                }
+            }
+        }
+
+        val isDark = isSystemInDarkTheme()
+        val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val ctx = LocalContext.current
+            if (isDark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        } else {
+            if (isDark) HermesDarkColorScheme else HermesLightColorScheme
+        }
+        val view = LocalView.current
+        if (!view.isInEditMode) {
+            SideEffect {
+                val window = (view.context as Activity).window
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDark
+            }
+        }
+        MaterialTheme(colorScheme = colorScheme) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                    ) {
+                        WebShell(
+                            webView = webView,
+                            isLoading = uiState.isLoading,
+                            hasLoadedContent = uiState.hasLoadedContent,
+                            isOffline = uiState.isOffline,
+                            isReconnecting = uiState.isReconnecting,
+                            errorMessage = uiState.errorMessage,
+                            onRefresh = onReload,
+                            onRetry = {
+                                viewModel.cancelAutoRetry()
+                                onReload()
+                            },
+                            onOpenExternal = onOpenExternal,
+                            onOpenSettings = { viewModel.openSettings() },
+                            onBack = if (webView.canGoBack()) {{ webView.goBack() }} else null
+                        )
+                        SnackbarHost(hostState = snackbarHostState)
+
+                        // Anti-phishing chip: shows the current host while an in-app OAuth flow is
+                        // on a non-allowlisted origin, since the WebView has no URL bar.
+                        uiState.oauthInFlowHost?.let { host ->
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 8.dp),
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                tonalElevation = 4.dp
+                            ) {
+                                Text(
+                                    text = "🔒 Signing in on $host",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (uiState.isSettingsVisible) {
+                    SettingsScreen(
+                    initialServerUrl = uiState.settings.serverUrl,
+                    isConfigured = uiState.settings.isConfigured,
+                    backgroundReconnectEnabled = uiState.backgroundReconnectEnabled,
+                    backgroundActivityFullTextEnabled = uiState.backgroundActivityFullTextEnabled,
+                    reconnectPollIntervalSeconds = uiState.reconnectPollIntervalSeconds,
+                    requireVpnForTailscaleEnabled = uiState.requireVpnForTailscaleEnabled,
+                    vpnLaunchPackageName = uiState.vpnLaunchPackageName,
+                    vpnLaunchAppOptions = vpnLaunchAppOptions,
+                    sseTransportEnabled = uiState.sseTransportEnabled,
+                    sseSupportStatus = uiState.sseSupportStatus,
+                    debugLoggingEnabled = uiState.debugLoggingEnabled,
+                    blockScreenshotsEnabled = uiState.blockScreenshotsEnabled,
+                    appUpdateAlertsEnabled = uiState.appUpdateAlertsEnabled,
+                    automaticAppUpdateChecksEnabled = uiState.automaticAppUpdateChecksEnabled,
+                    appUpdateChannelLabel = appUpdateCoordinator.appUpdateChannelLabel(),
+                    appUpdateStatus = uiState.appUpdateStatus,
+                    appUpdateReleaseUrl = uiState.appUpdateReleaseUrl,
+                    appUpdateDownloadUrl = uiState.appUpdateDownloadUrl,
+                    appUpdateInstallReady = uiState.appUpdateInstallReady,
+                    appUpdateReleaseNotes = uiState.appUpdateReleaseNotes,
+                    clientCertificateUri = uiState.clientCertificateUri,
+                    clientCertificatePassword = uiState.clientCertificatePassword,
+                    serverValidation = uiState.serverValidation,
+                    appVersionLabel = "Version ${appVersionName()}",
+                    serverProfiles = serverProfiles,
+                    onSave = onSaveSettings,
+                    onDismiss = { viewModel.closeSettings() },
+                    onSetBackgroundReconnect = { enabled ->
+                        if (enabled) {
+                            requestNotificationPermissionIfNeeded()
+                        }
+                        viewModel.setBackgroundReconnectEnabled(enabled)
+                        foregroundServiceCoordinator.onUiStateChanged(
+                            state = viewModel.uiState.value,
+                            activityVisible = activityVisible
+                        )
+                    },
+                    onSetBackgroundActivityFullTextEnabled = { enabled ->
+                        viewModel.setBackgroundActivityFullTextEnabled(enabled)
+                    },
+                    onSetReconnectPollIntervalSeconds = { seconds ->
+                        viewModel.setReconnectPollIntervalSeconds(seconds)
+                    },
+                    onSetRequireVpnForTailscaleEnabled = { enabled ->
+                        viewModel.setRequireVpnForTailscaleEnabled(enabled)
+                    },
+                    onSetVpnLaunchPackageName = { packageName ->
+                        viewModel.setVpnLaunchPackageName(packageName)
+                    },
+                    onSetSseTransportEnabled = { enabled ->
+                        setSseTransportEnabled(enabled)
+                    },
+                    onCheckSseSupport = {
+                        checkSseSupport(
+                            enableIfAvailable = false,
+                            disableIfUnavailable = false
+                        )
+                    },
+                    onCopySsePrompt = { copySseEnablePromptToClipboard() },
+                    onSetDebugLoggingEnabled = { enabled ->
+                        if (enabled) {
+                            requestNotificationPermissionIfNeeded()
+                        }
+                        viewModel.setDebugLoggingEnabled(enabled)
+                        foregroundServiceCoordinator.onUiStateChanged(
+                            state = viewModel.uiState.value,
+                            activityVisible = activityVisible
+                        )
+                    },
+                    onSetBlockScreenshotsEnabled = { enabled ->
+                        viewModel.setBlockScreenshotsEnabled(enabled)
+                        applyScreenshotSecurity(enabled)
+                    },
+                    onSetAppUpdateAlertsEnabled = { enabled ->
+                        if (enabled) {
+                            requestNotificationPermissionIfNeeded()
+                        }
+                        viewModel.setAppUpdateAlertsEnabled(enabled)
+                    },
+                    onSetClientCertificateConfig = { uri, password ->
+                        viewModel.setClientCertificateConfig(uri, password)
+                    },
+                    onClearClientCertificateConfig = {
+                        viewModel.clearClientCertificateConfig()
+                    },
+                    onSetAutomaticAppUpdateChecksEnabled = { enabled ->
+                        viewModel.setAutomaticAppUpdateChecksEnabled(enabled)
+                        if (enabled) {
+                            appUpdateCoordinator.scheduleAutomaticAppUpdateCheck()
+                        } else {
+                            appUpdateCoordinator.cancelAutomaticAppUpdateCheck()
+                        }
+                    },
+                    onCheckAppUpdates = { appUpdateCoordinator.checkForAppUpdates(force = true) },
+                    onDownloadAppUpdate = { appUpdateCoordinator.downloadAvailableGitHubUpdate() },
+                    onOpenAppUpdateRelease = {
+                        val releaseUrl = uiState.appUpdateReleaseUrl
+                        when {
+                            releaseUrl.isNullOrBlank() -> Unit
+                            releaseUrl.startsWith("play://") -> appUpdateCoordinator.startPlayUpdateFlow()
+                            else -> openInExternalBrowser(releaseUrl)
+                        }
+                    },
+                    onShareDebugLog = { shareLatestDebugLog() },
+                    onDownloadDebugLog = { downloadLatestDebugLog() },
+                    onViewGithubIssues = { openInExternalBrowser(HermesGithubIssuesListUrl) },
+                    onNewGithubIssue = { openInExternalBrowser(HermesGithubNewIssueUrl) },
+                    onAddProfile = { name, url -> serverProfileCoordinator.handleAddServerProfile(name, url) },
+                    onDeleteProfile = { profileId -> serverProfileCoordinator.handleDeleteServerProfile(profileId) },
+                    onEditProfile = { profileId, newName, newUrl -> serverProfileCoordinator.handleEditServerProfile(profileId, newName, newUrl) },
+                    onSwitchProfile = { profileId -> serverProfileCoordinator.handleSwitchServerProfile(profileId) },
+                    onReconnectCurrentServer = { refreshConfiguredHermes(closeSettings = true) },
+                    onClearServerValidation = { viewModel.clearServerValidationState() }
+                )
+            } // end if (isSettingsVisible)
+
+            // Debug-only: draggable floating overlay that shares the latest
+            // captured debug log with one tap. Auto-enabled debug logging in
+            // onCreate() means a log is being captured from app start, so this
+            // gives testers a frictionless way to ship the file out. Rendered
+            // ABOVE the Settings sheet too, because the most common moment a
+            // tester hits a connection error is exactly when Settings is open
+            // (e.g. failed first-run server preflight) and they need to send
+            // the log right then.
+            val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            if (isDebuggable) {
+                DebugLogFloatingOverlay(onTap = { shareLatestDebugLog() })
+            }
+        } // end outer Box
+    } // end MaterialTheme
+    }
+
+    // This listener only restores WebView focus and returns false so WebView retains
+    // click handling and accessibility semantics.
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+    private fun buildWebView(): WebView {
+        return WebView(this).apply {
+            HermesWebViewConfigurator.configureMainWebView(
+                webView = this,
+                appVersionName = appVersionName(),
+                configureStorageAndCache = ::configureWebViewStorageAndCache,
+                disableWebViewDarkening = ::disableWebViewDarkening
+            )
+            installHermesNotificationWebMessageBridge(this)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnTouchListener { v, event ->
+                if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_UP) {
+                    if (!v.hasFocus()) {
+                        v.requestFocus()
+                    }
+                }
+                false
+            }
+            // Allow native long-press so Android's text selection handles appear in
+            // conversation messages (issue #35). Default WebView behavior already
+            // routes long-press on links to the system context menu.
+            isLongClickable = true
+
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+
+            webChromeClient = object : WebChromeClient() {
+                override fun onCreateWindow(
+                    view: WebView?,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message?
+                ): Boolean {
+                    return createPopupWindow(resultMsg)
+                }
+
+                override fun onPermissionRequest(request: PermissionRequest?) {
+                    if (request == null) return
+                    runOnUiThread {
+                        handleWebViewPermissionRequest(request)
+                    }
+                }
+
+                override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                    super.onPermissionRequestCanceled(request)
+                    if (request != null) {
+                        voiceCaptureGate.onCaptureRequestCanceled(request)
+                    }
+                }
+
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?
+                ): Boolean {
+                    if (filePathCallback == null) return false
+                    val staged = viewModel.consumeSharedFileUris().map(Uri::parse)
+                    if (staged.isNotEmpty()) {
+                        filePathCallback.onReceiveValue(staged.toTypedArray())
+                        viewModel.dismissShareBanner()
+                        return true
+                    }
+                    this@MainActivity.filePathCallback?.onReceiveValue(null)
+                    this@MainActivity.filePathCallback = filePathCallback
+                    pendingCameraCaptureUri = null
+                    Toast.makeText(this@MainActivity, "Choose file(s) to upload", Toast.LENGTH_SHORT).show()
+                    if (shouldDirectCaptureImage(fileChooserParams)) {
+                        val captureUri = createTempCameraCaptureUri()
+                        if (captureUri != null) {
+                            pendingCameraCaptureUri = captureUri
+                            cameraCaptureLauncher.launch(captureUri)
+                            return true
+                        }
+                    }
+                    filePickerLauncher.launch(normalizedMimeTypes(fileChooserParams))
+                    return true
+                }
+            }
+
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val target = request?.url?.toString() ?: return true
+                    val handled = handleMainWebViewNavigation(target)
+                    if (!handled && request.isForMainFrame) {
+                        restrictMediaPlaybackBeforeNavigation(target)
+                    }
+                    return handled
+                }
+
+                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    handleMainWebViewPageStarted(url)
+                }
+
+                override fun onPageCommitVisible(view: WebView?, url: String?) {
+                    super.onPageCommitVisible(view, url)
+                    applyHermesWebViewCompatibilityFixes(view, url)
+                    viewModel.onPageCommitVisible(url)
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    applyHermesWebViewCompatibilityFixes(view, url)
+                    viewModel.onPageFinished(
+                        url = url,
+                        // Persist only trusted Hermes WebUI routes as the cold-start URL.
+                        // OAuth provider pages (non-allowlisted in-app IdP hosts) must not be
+                        // restored on launch: the flow is gone and the page needs the OAuth
+                        // context to render.
+                        rememberLastUrl = matchesConfiguredWebUiRoute(url) &&
+                            oauthReturnNavigation.shouldRememberUrl(url)
+                    )
+                    completeOAuthReturnIfHermesPage(view, url)
+                    CookieManager.getInstance().flush()
+                }
+
+                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    val visitedUrl = url?.takeIf { it.isNotBlank() } ?: return
+                    // Ignore internal/non-web URLs; persist only trusted Hermes WebUI routes.
+                    if (!urlPolicy.isAllowed(visitedUrl)) return
+                    if (!matchesConfiguredWebUiRoute(visitedUrl)) return
+                    if (!oauthReturnNavigation.shouldRememberUrl(visitedUrl)) return
+
+                    // Persist SPA/history route changes so cold starts restore the active session route.
+                    viewModel.onUrlVisited(url = visitedUrl, rememberLastUrl = true)
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (request?.isForMainFrame != true) return
+                    val failedUrl = request.url?.toString().orEmpty()
+                    if (
+                        isLocalNetworkPermissionError(error) &&
+                            failedUrl.isNotBlank() &&
+                            !hasLocalNetworkPermission()
+                    ) {
+                        requestLocalNetworkPermissionIfNeeded(
+                            url = failedUrl,
+                            onGranted = {
+                                loadServerUrlWithVpnGuard(failedUrl)
+                            }
+                        )
+                        return
+                    }
+                    val offline = isOfflineError(error?.errorCode)
+                    val message = error?.description?.toString() ?: "Failed to load page"
+                    DiagnosticsLogger.record(
+                        this@MainActivity,
+                        "webview_main_frame_error",
+                        mapOf(
+                            "origin" to DiagnosticsLogger.originOnly(request.url?.toString()),
+                            "path" to DiagnosticsLogger.pathOnly(request.url?.toString()),
+                            "error_code" to error?.errorCode?.toString(),
+                            "offline" to offline.toString()
+                        )
+                    )
+                    viewModel.onPageError(message, offline)
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    errorResponse: WebResourceResponse?
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    if (request?.isForMainFrame != true) return
+                    DiagnosticsLogger.record(
+                        this@MainActivity,
+                        "webview_main_frame_http_error",
+                        mapOf(
+                            "origin" to DiagnosticsLogger.originOnly(request.url?.toString()),
+                            "path" to DiagnosticsLogger.pathOnly(request.url?.toString()),
+                            "http_status" to errorResponse?.statusCode?.toString()
+                        )
+                    )
+                }
+
+                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
+                    handler?.cancel()
+                    DiagnosticsLogger.record(
+                        this@MainActivity,
+                        "webview_ssl_error",
+                        mapOf(
+                            "origin" to DiagnosticsLogger.originOnly(error?.url),
+                            "path" to DiagnosticsLogger.pathOnly(error?.url),
+                            "primary_error" to error?.primaryError?.toString()
+                        )
+                    )
+                    viewModel.onPageError("SSL validation failed for this page.", false)
+                }
+
+                override fun onReceivedClientCertRequest(view: WebView?, request: ClientCertRequest?) {
+                    if (view == null || request == null) return
+                    val allowedHosts = viewModel.uiState.value.settings.allowedHosts
+                    if (!ClientCertificateRequestSupport.isAllowedHost(request.host, allowedHosts)) {
+                        DiagnosticsLogger.record(
+                            this@MainActivity,
+                            "client_cert_request_blocked",
+                            mapOf(
+                                "host" to request.host.orEmpty(),
+                                "allowlist" to allowedHosts.joinToString(",")
+                            )
+                        )
+                        request.cancel()
+                        return
+                    }
+                    val cert = ClientCertificateRequestSupport.resolveRequest(
+                        contentResolver = contentResolver,
+                        config = settingsRepository.getClientCertificateConfig(),
+                        request = request,
+                        allowedHosts = allowedHosts
+                    )
+                    if (cert == null) {
+                        DiagnosticsLogger.record(
+                            this@MainActivity,
+                            "client_cert_request_unavailable",
+                            mapOf(
+                                "host" to request.host.orEmpty(),
+                                "configured" to settingsRepository.getClientCertificateConfig().uri.isNullOrBlank().not().toString()
+                            )
+                        )
+                        request.cancel()
+                        return
+                    }
+                    request.proceed(cert.privateKey, cert.certChain)
+                }
+            }
+
+            setDownloadListener(
+                HermesWebViewDownloadListener(this@MainActivity) { url -> urlPolicy.isAllowed(url) }
+            )
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createPopupWindow(resultMsg: Message?): Boolean {
+        val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+        val popup = WebView(this).apply {
+            HermesWebViewConfigurator.configurePopupWebView(
+                webView = this,
+                configureStorageAndCache = ::configureWebViewStorageAndCache,
+                disableWebViewDarkening = ::disableWebViewDarkening
+            )
+            webViewClient = buildPopupWebViewClient(this)
+        }
+
+        trackPopupWindow(popup)
+        transport.webView = popup
+        resultMsg.sendToTarget()
+        return true
+    }
+
+    private fun trackPopupWindow(popup: WebView) {
+        trackedPopups.add(popup)
+        popup.postDelayed({
+            // Never-navigated window.open('') orphan: destroy it unless it became the
+            // active OAuth popup (that path is cleaned up by the OAuth timeout instead).
+            if (activeOAuthPopup !== popup) destroyPopup(popup)
+        }, ORPHAN_POPUP_SWEEP_MS)
+    }
+
+    private fun buildPopupWebViewClient(popup: WebView): WebViewClient {
+        return object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                val target = request?.url?.toString() ?: return true
+                return handlePopupNavigation(
+                    popup = popup,
+                    target = target
+                )
+            }
+
+            override fun onPageStarted(
+                view: WebView?,
+                url: String?,
+                favicon: android.graphics.Bitmap?
+            ) {
+                super.onPageStarted(view, url, favicon)
+                if (!url.isNullOrBlank()) {
+                    handlePopupPageStarted(popup, url)
+                }
+            }
+        }
+    }
+
+    private fun handlePopupNavigation(
+        popup: WebView,
+        target: String
+    ): Boolean {
+        if (handleAppSettingsNavigation(target)) {
+            destroyPopup(popup)
+            return true
+        }
+
+        val callbackFlow = activeOAuthFlow.takeIf { activeOAuthPopup === popup }
+        if (callbackFlow?.isVerifiedCallbackUrl(target) == true) {
+            clearActiveOAuthPopup()
+            loadOAuthCallbackInMainWebView(callbackFlow, target)
+            destroyPopup(popup)
+            return true
+        }
+
+        val flow = parseTrustedOAuthStart(target)
+        if (flow != null) {
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(flow)
+            restrictMediaPlaybackBeforeNavigation(target)
+            webView.loadUrl(target)
+            destroyPopup(popup)
+            return true
+        }
+
+        if (activeOAuthPopup === popup && activeOAuthFlow != null && isHttpOrHttpsUrl(target)) {
+            refreshActiveOAuthTimeout()
+            return false
+        }
+
+        clearActiveOAuthPopup()
+        handleNewWindowUrl(target)
+        destroyPopup(popup)
+        return true
+    }
+
+    private fun handlePopupPageStarted(popup: WebView, url: String) {
+        val callbackFlow = activeOAuthFlow.takeIf { activeOAuthPopup === popup }
+        if (callbackFlow?.isVerifiedCallbackUrl(url) == true) {
+            clearActiveOAuthPopup()
+            loadOAuthCallbackInMainWebView(callbackFlow, url)
+            destroyPopup(popup)
+            return
+        }
+
+        val startedFlow = parseTrustedOAuthStart(url)
+        if (startedFlow != null) {
+            // Move popup OAuth flows to the main frame so they are visible and interactive.
+            rememberActiveMainFrameOAuth(startedFlow)
+            restrictMediaPlaybackBeforeNavigation(url)
+            webView.loadUrl(url)
+            destroyPopup(popup)
+            return
+        }
+
+        if (activeOAuthPopup === popup && activeOAuthFlow != null && isHttpOrHttpsUrl(url)) {
+            refreshActiveOAuthTimeout()
+            return
+        }
+
+        clearActiveOAuthPopup()
+        handleNewWindowUrl(url)
+        destroyPopup(popup)
+    }
+
+    private fun handleMainWebViewNavigation(target: String): Boolean {
+        if (handleAppSettingsNavigation(target)) return true
+
+        val activeTopLevelFlow = activeMainFrameOAuthFlow
+        if (activeTopLevelFlow?.isVerifiedCallbackUrl(target) == true) {
+            oauthReturnNavigation.begin(activeTopLevelFlow)
+            clearActiveMainFrameOAuth()
+            return false
+        }
+
+        val startedTopLevelFlow = parseTrustedOAuthStart(target)
+        if (startedTopLevelFlow != null) {
+            rememberActiveMainFrameOAuth(startedTopLevelFlow)
+            return false
+        }
+
+        if (activeTopLevelFlow != null && isHttpOrHttpsUrl(target)) {
+            // Keep loading provider/redirect hosts in-app only while the flow window
+            // (set once at flow start) is still open. Enforce the timeout INLINE and do
+            // NOT refresh it per navigation: refreshing on every http(s) load let a
+            // stale/hijacked flow hold the host allowlist open indefinitely. Once the
+            // window closes, clear the flow and fall through so non-allowlisted hosts are
+            // externalized again.
+            // Residual (P2): the flow is still gated only by the redirect_uri->server-origin
+            // check because a non-allowlisted authorize host is intentionally allowed in-app
+            // for external/self-hosted OIDC providers (see OAuthPopupFlowTest). Requiring the
+            // authorize host to be allowlisted would break legitimate provider logins; fully
+            // closing the in-app phishing surface needs a product decision (configurable
+            // trusted-IdP allowlist or an in-flow URL indicator).
+            if (System.currentTimeMillis() <= oauthFlowTimeoutMs) {
+                return false
+            }
+            clearActiveMainFrameOAuth()
+        }
+
+        // Keep the verified callback and every same-origin return redirect in the main
+        // WebView until the final Hermes page finishes. A single-navigation flag is not
+        // sufficient because WebView callback ordering and IdP redirect chains vary.
+        if (oauthReturnNavigation.shouldStayInMainWebView(target)) {
+            return false
+        }
+
+        if (matchesConfiguredDashboardRoute(target)) {
+            openDashboardInCustomTab(target)
+            return true
+        }
+
+        return when (urlPolicy.navigationDecision(target)) {
+            NavigationDecision.ALLOW_IN_WEBVIEW -> false
+            NavigationDecision.OPEN_IN_EXTERNAL_BROWSER -> {
+                openInExternalBrowser(target)
+                true
+            }
+            NavigationDecision.BLOCK -> true
+        }
+    }
+
+    private fun handleMainWebViewPageStarted(url: String?) {
+        if (!url.isNullOrBlank()) {
+            val activeTopLevelFlow = activeMainFrameOAuthFlow
+            if (activeTopLevelFlow?.isVerifiedCallbackUrl(url) == true) {
+                oauthReturnNavigation.begin(activeTopLevelFlow)
+                clearActiveMainFrameOAuth()
+            } else {
+                parseTrustedOAuthStart(url)?.let { rememberActiveMainFrameOAuth(it) }
+            }
+        }
+        updateOAuthInFlowHost(url)
+        webView.settings.mediaPlaybackRequiresUserGesture =
+            !currentWebTrustPolicy().allowsGestureFreeMediaPlayback(url)
+        viewModel.onPageStarted(url)
+    }
+
+    private fun restrictMediaPlaybackBeforeNavigation(target: String) {
+        HermesMediaPlaybackPolicy.beforeAllowedMainFrameNavigation(webView, target, currentWebTrustPolicy())
+    }
+
+    private fun completeOAuthReturnIfHermesPage(view: WebView?, url: String?) {
+        if (view == null || url.isNullOrBlank()) return
+        if (!oauthReturnNavigation.shouldStayInMainWebView(url)) return
+
+        view.evaluateJavascript(
+            """
+            (function() {
+              return !!(
+                window.__HERMES_WEBUI_BUNDLE_VERSION__ ||
+                (document.querySelector('.layout') && document.querySelector('main.main'))
+              );
+            })();
+            """.trimIndent()
+        ) { result ->
+            // Ignore a delayed result from a page that navigated again while JavaScript ran.
+            if (view.url == url) {
+                val completed = oauthReturnNavigation.completeIfHermesPage(
+                    url = url,
+                    isHermesPage = result == "true"
+                )
+                if (completed && matchesConfiguredWebUiRoute(url)) {
+                    viewModel.onUrlVisited(url = url, rememberLastUrl = true)
+                }
+            }
+        }
+    }
+
+    private fun handleWebViewPermissionRequest(request: PermissionRequest) {
+        val requestedResources = request.resources?.toSet().orEmpty()
+        val requestsAudio = requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+        voiceCaptureGate.onCaptureRequested(
+            request = request,
+            trustedAudioRequest = requestsAudio && isTrustedPermissionOrigin(request.origin),
+            hasRecordAudioPermission = hasRecordAudioPermission()
+        )
+    }
+
+    private fun requestLocalNetworkPermissionIfNeeded(
+        url: String,
+        onGranted: () -> Unit,
+        onDenied: (() -> Unit)? = null
+    ) {
+        if (!shouldRequestLocalNetworkPermission(url) || hasLocalNetworkPermission()) {
+            onGranted()
+            return
+        }
+
+        pendingLocalNetworkPermissionAction = onGranted
+        pendingLocalNetworkPermissionDeniedAction = onDenied
+        localNetworkPermissionLauncher.launch("android.permission.ACCESS_LOCAL_NETWORK")
+    }
+
+    private fun hasLocalNetworkPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            "android.permission.ACCESS_LOCAL_NETWORK"
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun shouldRequestLocalNetworkPermission(url: String): Boolean {
+        val host = runCatching { url.toUri().host?.trim().orEmpty() }.getOrDefault("")
+        if (host.isBlank()) return false
+        val normalizedHost = host.lowercase()
+        if (normalizedHost == "localhost" || normalizedHost.endsWith(".local")) return true
+        val strippedBrackets = normalizedHost.removePrefix("[").removeSuffix("]")
+        return isLikelyLocalAddress(strippedBrackets)
+    }
+
+    private fun isLikelyLocalAddress(host: String): Boolean {
+        return runCatching {
+            val address = InetAddress.getByName(host)
+            address.isAnyLocalAddress ||
+                address.isLoopbackAddress ||
+                address.isLinkLocalAddress ||
+                address.isSiteLocalAddress
+        }.getOrDefault(false)
+    }
+
+    private fun isLocalNetworkPermissionError(error: WebResourceError?): Boolean {
+        return error?.description?.contains(
+            "ERR_LOCAL_NETWORK_PERMISSION_MISSING",
+            ignoreCase = true
+        ) == true
+    }
+
+    private fun installHermesNotificationWebMessageBridge(view: WebView) {
+        notificationBridgeCoordinator.installBridge(view)
+    }
+
+    private fun isTrustedNotificationBridgeSource(sourceOrigin: Uri, isMainFrame: Boolean): Boolean {
+        return currentWebTrustPolicy().isTrustedNotificationBridgeSource(
+            sourceOrigin = sourceOrigin.toString(),
+            isMainFrame = isMainFrame,
+            currentMainFrameUrl = webView.url
+        )
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        notificationBridgeCoordinator.requestNotificationPermissionIfNeeded()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun launchPostNotificationsPermission() {
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun setSseTransportEnabled(enabled: Boolean) {
+        if (!enabled) {
+            viewModel.setSseTransportEnabled(false)
+            viewModel.setSseSupportStatus("SSE transport disabled.")
+            return
+        }
+
+        checkSseSupport(
+            enableIfAvailable = true,
+            disableIfUnavailable = true
+        )
+    }
+
+    private fun copySseEnablePromptToClipboard() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (clipboard == null) {
+            Toast.makeText(this, "Clipboard unavailable on this device.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("Hermes SSE enable prompt", HermesApiClient.SSE_ENABLE_HERMES_PROMPT)
+        )
+        Toast.makeText(this, "Copied SSE enable prompt.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun checkSseSupport(
+        enableIfAvailable: Boolean,
+        disableIfUnavailable: Boolean
+    ) {
+        val serverUrl = viewModel.uiState.value.settings.serverUrl
+        if (serverUrl.isBlank()) {
+            if (disableIfUnavailable) {
+                viewModel.setSseTransportEnabled(false)
+            }
+            viewModel.setSseSupportStatus("Configure a server URL before checking SSE support.")
+            Toast.makeText(this, "Configure a server URL before checking SSE", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModel.setSseSupportStatus("Checking server SSE support…")
+        lifecycleScope.launch {
+            // Pass the WebView session cookie so probes authenticate on password/OIDC servers
+            // the same way the real /api/session/stream connection does (issue #75).
+            val sessionCookie = CookieManager.getInstance().getCookie(serverUrl)
+            when (HermesApiClient.detectSseCapability(serverUrl, sessionCookie = sessionCookie)) {
+                HermesApiClient.SseCapability.SESSION_SSE_ENABLED -> {
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
+                    }
+                    viewModel.setSseSupportStatus(
+                        "✅  SSE is supported and enabled on this server."
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (enableIfAvailable) "SSE enabled." else "SSE is available on this server.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                HermesApiClient.SseCapability.RECONNECT_STREAM_AVAILABLE -> {
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
+                    }
+                    viewModel.setSseSupportStatus(
+                        "✅  SSE transport is supported via /api/sessions/events (reconnect stream)."
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (enableIfAvailable) "SSE enabled using reconnect stream." else "Reconnect SSE is available on this server.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                HermesApiClient.SseCapability.FEATURE_DISABLED -> {
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
+                    }
+                    viewModel.setSseSupportStatus(
+                        "Info: Gateway SSE extras are unavailable. Android will still try the authenticated " +
+                            "/api/session/stream for the active session; the lightweight reconnect probe was not detected."
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Gateway SSE extras unavailable; session streaming remains enabled.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                HermesApiClient.SseCapability.AUTH_REQUIRED -> {
+                    // Sign-in wall, not a missing feature: never disable the transport here.
+                    if (enableIfAvailable) {
+                        viewModel.setSseTransportEnabled(true)
+                    }
+                    viewModel.setSseSupportStatus(
+                        "🔒  Sign-in required: SSE capability could not be verified on this server. " +
+                            "SSE transport stays enabled; Android will try the authenticated /api/session/stream for the active session. " +
+                            "Sign in inside the app, then re-run the check."
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Sign-in required to verify SSE — transport left enabled.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                HermesApiClient.SseCapability.NONE -> {
+                    if (disableIfUnavailable) {
+                        viewModel.setSseTransportEnabled(false)
+                    }
+                    viewModel.setSseSupportStatus(
+                        "❔  Haven't checked SSE support yet: this check could not reach SSE endpoints. Try again when the server/network is stable." +
+                            if (disableIfUnavailable) " SSE transport was turned off." else ""
+                    )
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (disableIfUnavailable) {
+                            "SSE check failed — turning SSE transport off."
+                        } else {
+                            "SSE check failed — server unreachable or unexpected error."
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun webNotificationPermissionState(): String {
+        return notificationBridgeCoordinator.permissionState()
+    }
+
+    private fun ensureNotificationChannel() {
+        val channel = NotificationChannel(
+            HermesNotificationChannelId,
+            "Hermes updates",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Task completion and attention notifications from Hermes WebUI"
+        }
+        getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+    }
+
+    private fun latestDebugLogFile(): File? {
+        val logDir = File(filesDir, "debug-logs")
+        return logDir
+            .listFiles()
+            ?.filter { it.isFile && it.extension.equals("log", ignoreCase = true) }
+            ?.maxByOrNull { it.lastModified() }
+    }
+
+    private fun shareLatestDebugLog() {
+        val source = latestDebugLogFile()
+        if (source == null) {
+            Toast.makeText(this, "No debug log found yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val uri = runCatching {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", source)
+        }.getOrNull()
+        if (uri == null) {
+            Toast.makeText(this, "Unable to share debug log", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Hermes Android debug log")
+            putExtra(Intent.EXTRA_TEXT, "Attach this log to your GitHub issue.")
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(shareIntent, "Share debug log")
+        try {
+            startActivity(chooser)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No app found to share debug logs", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun downloadLatestDebugLog() {
+        val source = latestDebugLogFile()
+        if (source == null) {
+            Toast.makeText(this, "No debug log found yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val exportDir = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "HermesLogs")
+        if (!exportDir.exists() && !exportDir.mkdirs()) {
+            Toast.makeText(this, "Unable to prepare download folder", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val target = File(exportDir, source.name)
+        val copied = runCatching {
+            source.copyTo(target, overwrite = true)
+            target
+        }.getOrNull()
+        if (copied == null) {
+            Toast.makeText(this, "Failed to save debug log", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        Toast.makeText(
+            this,
+            "Saved log to Android/data/$packageName/files/Download/HermesLogs",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    private fun isTrustedNotificationTarget(url: String?): Boolean {
+        return currentWebTrustPolicy().isTrustedNotificationTarget(url)
+    }
+
+    private fun updateWebNotificationPermissionState(permission: String = webNotificationPermissionState()) {
+        if (!matchesConfiguredWebUiRoute(webView.url)) return
+        val quotedPermission = JSONObject.quote(permission)
+        webView.evaluateJavascript(
+            "window.__hermesAndroidSetNotificationPermission && window.__hermesAndroidSetNotificationPermission($quotedPermission);",
+            null
+        )
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun isTrustedPermissionOrigin(origin: Uri?): Boolean {
+        return currentWebTrustPolicy().isTrustedPermissionOrigin(
+            origin = origin?.toString(),
+            currentMainFrameUrl = webView.url
+        )
+    }
+
+    private fun disableWebViewDarkening(settings: WebSettings) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false)
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            @Suppress("DEPRECATION")
+            WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
+        }
+    }
+
+    private fun configureWebViewStorageAndCache(settings: WebSettings) {
+        settings.domStorageEnabled = true
+        settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        ServiceWorkerController.getInstance().serviceWorkerWebSettings.apply {
+            cacheMode = WebSettings.LOAD_DEFAULT
+            allowContentAccess = false
+            allowFileAccess = false
+            blockNetworkLoads = false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun appVersionName(): String {
+        return runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+        }.getOrDefault("unknown")
+    }
+
+    private fun applyHermesWebViewCompatibilityFixes(view: WebView?, url: String?) {
+        if (view == null) return
+        HermesMediaPlaybackPolicy.onDocumentReady(view, currentWebTrustPolicy())
+        val effectiveUrl = url ?: viewModel.uiState.value.currentUrl
+        if (matchesConfiguredWebUiRoute(effectiveUrl)) {
+            // Android WebView can report supported dynamic viewport units while computing them as 0px.
+            // Hermes WebUI uses 100dvh for the root flex shell (and 100vh max-height for floating
+            // menus), so force the measured viewport height for both.
+            applyHermesWebUiRuntimeScripts(view)
+            return
+        }
+
+        // In-app OAuth provider pages render in this same WebView, so they hit the same
+        // viewport-unit (vh/dvh = 0px) collapse, but the WebUI-origin document-start shims do
+        // not cover provider origins. Apply only the generic viewport polyfill while a verified
+        // OAuth flow is active (e.g. the Nous portal login root uses h-screen and would
+        // otherwise collapse to a blank page).
+        if (activeMainFrameOAuthFlow != null && isHttpOrHttpsUrl(effectiveUrl)) {
+            view.evaluateJavascript(HermesWebUiScripts.viewportFixScript, null)
+        }
+    }
+
+    private fun applyHermesWebUiRuntimeScripts(view: WebView) {
+        val settings = viewModel.uiState.value.settings
+        val trustedOrigin = UrlOrigins.pageOrigin(settings.serverUrl) ?: return
+        val scripts = buildList {
+            add(HermesWebUiScripts.viewportFixScript)
+            add(HermesWebUiScripts.pinchZoomScript)
+            add(HermesWebUiScripts.microphoneFallbackScript)
+            add(HermesWebUiScripts.suppressClarifyAutofocusScript)
+            add(buildHermesWebUiNotificationBridgeScript())
+            add(buildHermesWebUiRouteRecoveryScript())
+            if (EnableAppSettingsSidebarShim) add(HermesWebUiScripts.appSettingsEntryScript)
+            add("window.__hermesAndroidHardwareKeyboard = ${isHardwareKeyboardAttached()};")
+        }
+        scripts.forEach { script ->
+            view.evaluateJavascript(
+                HermesWebUiScripts.buildOriginGuardedRuntimeScript(trustedOrigin, script),
+                null
+            )
+        }
+        voiceCaptureGate.onPageReady()
+    }
+
+    private fun isHardwareKeyboardAttached(): Boolean {
+        val config = resources.configuration
+        return config.keyboard != Configuration.KEYBOARD_NOKEYS &&
+            config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+    }
+
+    /**
+     * Pushes the current hardware-keyboard state into the WebUI page so the document-start
+     * Enter-key shim can defer to WebUI's native Enter-to-submit handling (desktop
+     * convention) while a physical keyboard is attached, and keep forcing a newline on a
+     * soft keyboard. The flag is read at keydown time, so updates apply without a reload.
+     */
+    private fun syncHardwareKeyboardState(view: WebView? = null) {
+        val target = view ?: if (::webView.isInitialized) webView else null
+        if (target == null) return
+        target.evaluateJavascript(
+            "window.__hermesAndroidHardwareKeyboard = ${isHardwareKeyboardAttached()};",
+            null
+        )
+    }
+
+    /** Dispatches the proposed host event; it does not itself stop existing capture or playback. */
+    private fun signalAppForegroundToWebUi(active: Boolean) {
+        if (!::webView.isInitialized || !matchesConfiguredWebUiRoute(webView.url)) return
+        val trustedOrigin = UrlOrigins.pageOrigin(viewModel.uiState.value.settings.serverUrl) ?: return
+        webView.evaluateJavascript(
+            HermesWebUiScripts.buildOriginGuardedRuntimeScript(
+                trustedOrigin,
+                HermesWebUiScripts.buildAppForegroundScript(active)
+            ),
+            null
+        )
+    }
+
+    private fun installHermesWebUiDocumentStartFixes(view: WebView, serverUrl: String) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        val originRule = UrlOrigins.documentStartOriginRule(serverUrl) ?: return
+
+        removeHermesWebUiDocumentStartFixes()
+        viewportFixScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.viewportFixScript
+        )
+        pinchZoomScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.pinchZoomScript
+        )
+        microphoneFallbackScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.microphoneFallbackScript
+        )
+        notificationBridgeScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            buildHermesWebUiNotificationBridgeScript()
+        )
+        routeRecoveryScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            buildHermesWebUiRouteRecoveryScript()
+        )
+        if (EnableAppSettingsSidebarShim) {
+            appSettingsEntryScriptHandler = addDocumentStartScript(
+                view,
+                originRule,
+                HermesWebUiScripts.appSettingsEntryScript
+            )
+        }
+        enterKeyNewlineScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.enterKeyNewlineScript
+        )
+        suppressClarifyAutofocusScriptHandler = addDocumentStartScript(
+            view,
+            originRule,
+            HermesWebUiScripts.suppressClarifyAutofocusScript
+        )
+    }
+
+    private fun removeHermesWebUiDocumentStartFixes() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+        viewportFixScriptHandler?.remove()
+        pinchZoomScriptHandler?.remove()
+        microphoneFallbackScriptHandler?.remove()
+        notificationBridgeScriptHandler?.remove()
+        routeRecoveryScriptHandler?.remove()
+        appSettingsEntryScriptHandler?.remove()
+        enterKeyNewlineScriptHandler?.remove()
+        suppressClarifyAutofocusScriptHandler?.remove()
+        viewportFixScriptHandler = null
+        pinchZoomScriptHandler = null
+        microphoneFallbackScriptHandler = null
+        notificationBridgeScriptHandler = null
+        routeRecoveryScriptHandler = null
+        appSettingsEntryScriptHandler = null
+        enterKeyNewlineScriptHandler = null
+        suppressClarifyAutofocusScriptHandler = null
+    }
+
+    private fun addDocumentStartScript(
+        view: WebView,
+        originRule: String,
+        script: String
+    ): ScriptHandler? {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return null
+        return runCatching {
+            WebViewCompat.addDocumentStartJavaScript(view, script, setOf(originRule))
+        }.getOrNull()
+    }
+
+    private fun handleAppSettingsNavigation(url: String?): Boolean {
+        val parsed = runCatching { url?.toUri() }.getOrNull() ?: return false
+        if (parsed.scheme != "hermes") return false
+        if (parsed.host != "app") return false
+        val path = parsed.path?.trimEnd('/')
+        if (path != "/settings") return false
+        viewModel.openSettings()
+        return true
+    }
+
+    private fun buildHermesWebUiRouteRecoveryScript(): String {
+        return HermesWebUiScripts.buildRouteRecoveryScript(currentRouteRecoveryUrl())
+    }
+
+    private fun currentRouteRecoveryUrl(): String {
+        val lastUrl = settingsRepository.getLastLoadedUrl().orEmpty()
+        val settings = viewModel.uiState.value.settings
+        if (lastUrl.isBlank() || !UrlOrigins.hasSameOrigin(lastUrl, settings.serverUrl)) return ""
+
+        val normalizedLastPath = UrlOrigins.normalizedPath(lastUrl)
+        return if (normalizedLastPath.isBlank()) "" else lastUrl
+    }
+
+    private fun buildHermesWebUiNotificationBridgeScript(): String {
+        return HermesWebUiScripts.buildNotificationBridgeScript(
+            bridgeName = HermesNotificationBridgeName,
+            initialPermission = webNotificationPermissionState()
+        )
+    }
+
+    private fun matchesConfiguredWebUiRoute(url: String?): Boolean {
+        return currentWebTrustPolicy().isConfiguredWebUiRoute(url)
+    }
+
+    private fun matchesConfiguredDashboardRoute(url: String?): Boolean {
+        return currentWebTrustPolicy().isConfiguredDashboardRoute(url)
+    }
+
+    private fun currentWebTrustPolicy(): WebTrustPolicy {
+        val settings = viewModel.uiState.value.settings
+        return WebTrustPolicy(
+            urlPolicy = urlPolicy,
+            configuredWebUiUrl = settings.serverUrl,
+            configuredDashboardUrl = settings.dashboardUrl
+        )
+    }
+
+    private fun handleNewWindowUrl(url: String) {
+        if (matchesConfiguredDashboardRoute(url)) {
+            openDashboardInCustomTab(url)
+            return
+        }
+        when (urlPolicy.navigationDecision(url)) {
+            NavigationDecision.ALLOW_IN_WEBVIEW -> {
+                restrictMediaPlaybackBeforeNavigation(url)
+                webView.loadUrl(url)
+            }
+            NavigationDecision.OPEN_IN_EXTERNAL_BROWSER -> openInExternalBrowser(url)
+            NavigationDecision.BLOCK -> Unit
+        }
+    }
+
+    private fun loadOAuthCallbackInMainWebView(flow: OAuthPopupFlow, url: String) {
+        oauthReturnNavigation.begin(flow)
+        restrictMediaPlaybackBeforeNavigation(url)
+        webView.loadUrl(url)
+    }
+
+    private fun parseTrustedOAuthStart(url: String): OAuthPopupFlow? {
+        val settings = viewModel.uiState.value.settings
+        return OAuthPopupFlow.parseAuthorizationStart(url)
+            ?.takeIf { it.redirectsToOrigin(settings.serverUrl) }
+    }
+
+    private fun isHttpOrHttpsUrl(url: String): Boolean {
+        val scheme = runCatching { url.toUri().scheme }.getOrNull()
+        return scheme.equals("http", ignoreCase = true) || scheme.equals("https", ignoreCase = true)
+    }
+
+    private fun saveSettings(serverUrl: String) {
+        if (!serverUrlValidator.isValid(serverUrl)) {
+            Toast.makeText(this, "Server URL must be a valid http:// or https:// URL", Toast.LENGTH_LONG).show()
+            return
+        }
+        val dashboardUrl = viewModel.uiState.value.settings.dashboardUrl
+        if (dashboardUrl.isNotBlank() && !serverUrlValidator.isValid(dashboardUrl)) {
+            Toast.makeText(this, "Dashboard URL must be blank or a valid http:// or https:// URL", Toast.LENGTH_LONG).show()
+            return
+        }
+        val persist = {
+            viewModel.saveAppUrls(serverUrl, dashboardUrl)
+            urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
+            installHermesWebUiDocumentStartFixes(webView, serverUrl)
+            requestLocalNetworkPermissionIfNeeded(
+                url = serverUrl,
+                onGranted = {
+                    loadServerUrlWithVpnGuard(serverUrl)
+                },
+                onDenied = {
+                    loadServerUrlWithVpnGuard(serverUrl)
+                }
+            )
+        }
+        serverProfileCoordinator.validateServerForPersistence(
+            serverUrl = serverUrl,
+            onFailure = { result -> showServerValidationRecoveryDialog(serverUrl, result, "Save server") { persist() } }
+        ) { persist() }
+    }
+
+    /**
+     * When enabled, mark the window FLAG_SECURE so the OS blocks screenshots/screen recording and
+     * shows a blank thumbnail in the app switcher — the last frame of an agent session (secrets,
+     * approvals, tool output) is not exposed. Opt-in via native settings.
+     */
+    private fun applyScreenshotSecurity(enabled: Boolean) {
+        if (enabled) {
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    private fun preflightConfiguredStartupServer(serverUrl: String) {
+        val lastLoadedUrl = settingsRepository.getLastLoadedUrl()
+        val notificationUrl = notificationPresenter.notificationTargetUrl(intent)
+        // Restore only trusted Hermes WebUI routes; fall back to the server root for
+        // dashboard-origin pages and for stale non-WebUI URLs (e.g. OAuth provider pages
+        // persisted by older builds mid-flow).
+        val startUrl = SelectedServerNavigation.startupUrl(
+            selectedServerUrl = serverUrl,
+            lastLoadedUrl = lastLoadedUrl,
+            notificationUrl = notificationUrl,
+            trustPolicy = currentWebTrustPolicy()
+        )
+        if (shouldRequireVpnForServerUrl(serverUrl) && !isVpnTransportActive()) {
+            queueVpnGuardedLoad(
+                serverUrl = serverUrl,
+                details = "Trying to connect Tailscale automatically. Hermes retries every second while waiting for VPN."
+            )
+            return
+        }
+        serverProfileCoordinator.preflightConfiguredStartupServer(
+            serverUrl = serverUrl,
+            startUrl = startUrl,
+            onContinueToWebView = { targetUrl ->
+                requestLocalNetworkPermissionIfNeeded(
+                    url = targetUrl,
+                    onGranted = {
+                        loadServerUrlWithVpnGuard(targetUrl)
+                    },
+                    onDenied = {
+                        loadServerUrlWithVpnGuard(targetUrl)
+                    }
+                )
+            }
+        )
+    }
+
+    private fun showServerValidationRecoveryDialog(
+        url: String,
+        result: HermesApiClient.ServerReadinessResult,
+        positiveLabel: String,
+        onProceedAnyway: () -> Unit
+    ) {
+        val body = buildString {
+            appendLine(result.message)
+            result.diagnostics?.takeIf { it.isNotBlank() }?.let {
+                appendLine()
+                appendLine("Diagnostics:")
+                append(it)
+            }
+        }.trim()
+        DiagnosticsLogger.record(
+            this,
+            "server_validation_recovery_dialog_shown",
+            mapOf(
+                "origin" to DiagnosticsLogger.originOnly(url),
+                "status" to result.status.name
+            )
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Server check failed")
+            .setMessage(body)
+            .setNeutralButton("Open in browser") { _, _ ->
+                DiagnosticsLogger.record(
+                    this,
+                    "server_validation_open_browser",
+                    mapOf(
+                        "origin" to DiagnosticsLogger.originOnly(url),
+                        "status" to result.status.name
+                    )
+                )
+                openInExternalBrowser(url)
+            }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton(positiveLabel) { _, _ ->
+                DiagnosticsLogger.record(
+                    this,
+                    "server_validation_proceed_anyway",
+                    mapOf(
+                        "origin" to DiagnosticsLogger.originOnly(url),
+                        "status" to result.status.name
+                    )
+                )
+                onProceedAnyway()
+            }
+            .show()
+    }
+
+    private fun performServerProfileSwitch(profile: ServerProfile) {
+        DiagnosticsLogger.record(
+            this,
+            "server_switch_confirmed",
+            mapOf("origin" to DiagnosticsLogger.originOnly(profile.url), "profile_id" to profile.id)
+        )
+        clearWebViewStateForServerSwitch()
+
+        viewModel.switchServerProfile(profile.id)
+        urlPolicy = UrlPolicy(viewModel.uiState.value.settings.allowedHosts)
+        val targetUrl = SelectedServerNavigation.switchTargetUrl(profile)
+        installHermesWebUiDocumentStartFixes(webView, targetUrl)
+        requestLocalNetworkPermissionIfNeeded(
+            url = targetUrl,
+            onGranted = {
+                loadServerUrlWithVpnGuard(targetUrl)
+            },
+            onDenied = {
+                loadServerUrlWithVpnGuard(targetUrl)
+            }
+        )
+        viewModel.closeSettings()
+        Toast.makeText(this, "Switched to ${profile.name}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun clearWebViewStateForServerSwitch() {
+        oauthReturnNavigation.clear()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        WebStorage.getInstance().deleteAllData()
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.clearHistory()
+        webView.clearCache(true)
+        webView.clearFormData()
+    }
+
+    private fun shouldDirectCaptureImage(fileChooserParams: WebChromeClient.FileChooserParams?): Boolean {
+        if (fileChooserParams?.isCaptureEnabled != true) return false
+        val acceptTypes = fileChooserParams.acceptTypes.orEmpty()
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+        if (acceptTypes.isEmpty()) return true
+        return acceptTypes.any { it == "image/*" || it.startsWith("image/") }
+    }
+
+    private fun normalizedMimeTypes(fileChooserParams: WebChromeClient.FileChooserParams?): Array<String> {
+        val acceptTypes = fileChooserParams?.acceptTypes.orEmpty()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return if (acceptTypes.isEmpty()) arrayOf("*/*") else acceptTypes.toTypedArray()
+    }
+
+    private fun createTempCameraCaptureUri(): Uri? {
+        return runCatching {
+            val captureDir = File(cacheDir, "upload-captures").apply { mkdirs() }
+            val captureFile = File.createTempFile("hermes-upload-", ".jpg", captureDir)
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", captureFile)
+        }.getOrNull()
+    }
+
+    private fun openInExternalBrowser(url: String) {
+        val browserIntent = Intent(Intent.ACTION_VIEW, url.toUri())
+        try {
+            startActivity(browserIntent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No browser found to open link", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openDashboardInCustomTab(url: String) {
+        val colorParams = CustomTabColorSchemeParams.Builder()
+            .setToolbarColor(android.graphics.Color.rgb(13, 13, 26))
+            .build()
+        val customTabsIntent = CustomTabsIntent.Builder()
+            .setColorScheme(CustomTabsIntent.COLOR_SCHEME_DARK)
+            .setDefaultColorSchemeParams(colorParams)
+            .setShowTitle(false)
+            .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
+            .setUrlBarHidingEnabled(true)
+            .build()
+        // Keep the browser-rendered dashboard out of MainActivity's singleTask stack.
+        customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        try {
+            customTabsIntent.launchUrl(this, url.toUri())
+        } catch (_: ActivityNotFoundException) {
+            openInExternalBrowser(url)
+        }
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        val payload = ShareIntentParser().parse(intent) ?: return
+        payload.fileUris.forEach { uri ->
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                // Ignore if provider does not support persistable permissions.
+            }
+        }
+        payload.sharedText?.let { text ->
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager
+                ?: return@let
+            clipboard.setPrimaryClip(ClipData.newPlainText("Hermes shared text", text))
+        }
+        viewModel.consumeSharePayload(payload)
+    }
+
+
+    private fun isOfflineError(errorCode: Int?): Boolean {
+        if (errorCode == null) return !hasNetworkConnectivity()
+        return errorCode == WebViewClient.ERROR_HOST_LOOKUP ||
+            errorCode == WebViewClient.ERROR_CONNECT ||
+            errorCode == WebViewClient.ERROR_TIMEOUT ||
+            !hasNetworkConnectivity()
+    }
+
+    private fun hasNetworkConnectivity(): Boolean {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return false
+        val network = manager.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun loadServerUrlWithVpnGuard(url: String) {
+        if (!shouldRequireVpnForServerUrl(url) || isVpnTransportActive()) {
+            pendingVpnGuardUrl = null
+            stopVpnReconnectWaitLoop()
+            restrictMediaPlaybackBeforeNavigation(url)
+            webView.loadUrl(url)
+            return
+        }
+
+        queueVpnGuardedLoad(
+            serverUrl = url,
+            details = "Trying to connect Tailscale automatically. Hermes retries every second while waiting for VPN."
+        )
+    }
+
+    private fun refreshConfiguredHermes(closeSettings: Boolean = false) {
+        val state = viewModel.uiState.value
+        val targetUrl = SelectedServerNavigation.reconnectUrl(
+            currentUrl = state.currentUrl,
+            selectedServerUrl = state.settings.serverUrl,
+            trustPolicy = currentWebTrustPolicy()
+        )
+        if (targetUrl.isBlank()) {
+            viewModel.openSettings()
+            return
+        }
+        if (closeSettings) {
+            viewModel.closeSettings()
+        }
+        loadServerUrlWithVpnGuard(targetUrl)
+    }
+
+    private fun shouldRequireVpnForServerUrl(url: String): Boolean {
+        return viewModel.uiState.value.requireVpnForTailscaleEnabled &&
+            TailscaleEndpointDetector.isTailscaleUrl(url)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun isVpnTransportActive(): Boolean {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return false
+        return manager.getAllNetworks().any { network ->
+            val capabilities = manager.getNetworkCapabilities(network) ?: return@any false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }
+    }
+
+    private fun maybeLaunchVpnForServer(url: String, showPrompt: Boolean) {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastVpnLaunchAttemptElapsedMs < 5_000L) return
+        lastVpnLaunchAttemptElapsedMs = nowElapsed
+
+        val preferredVpnPackage = viewModel.uiState.value.vpnLaunchPackageName
+        if (TailscaleEndpointDetector.isTailscaleUrl(url) && requestTailscaleConnect()) {
+            scheduleTailscaleLaunchFallback(url, preferredVpnPackage, showPrompt)
+            return
+        }
+
+        val launchedVpnApp = if (TailscaleEndpointDetector.isTailscaleUrl(url)) {
+            launchVpnApp(TailscaleAndroidPackage) || launchVpnApp(preferredVpnPackage)
+        } else {
+            launchVpnApp(preferredVpnPackage)
+        }
+
+        if (!launchedVpnApp) {
+            val vpnIntent = Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { startActivity(vpnIntent) }
+        }
+
+        if (showPrompt) {
+            Toast.makeText(this, "Start your VPN, then reconnect Hermes.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun requestTailscaleConnect(): Boolean {
+        val connectIntent = Intent(TailscaleConnectVpnAction).apply {
+            `package` = TailscaleAndroidPackage
+            addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+        }
+        return runCatching {
+            packageManager.getApplicationInfo(TailscaleAndroidPackage, 0)
+            sendBroadcast(connectIntent)
+            true
+        }.getOrElse { false }
+    }
+
+    private fun scheduleTailscaleLaunchFallback(
+        serverUrl: String,
+        preferredVpnPackage: String,
+        showPrompt: Boolean
+    ) {
+        tailscaleLaunchFallbackJob?.cancel()
+        tailscaleLaunchFallbackJob = lifecycleScope.launch {
+            delay(TailscaleAutoConnectFallbackMs)
+            if (pendingVpnGuardUrl != serverUrl || isVpnTransportActive()) return@launch
+
+            val launchedVpnApp = launchVpnApp(TailscaleAndroidPackage) ||
+                launchVpnApp(preferredVpnPackage)
+            if (!launchedVpnApp) {
+                val vpnIntent = Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { startActivity(vpnIntent) }
+            }
+            if (showPrompt) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Tailscale is taking longer than expected. Complete its connection, and Hermes will continue automatically.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun launchVpnApp(packageName: String?): Boolean {
+        val normalizedPackageName = packageName?.trim().orEmpty()
+        if (normalizedPackageName.isBlank()) return false
+        val launchIntent = packageManager.getLaunchIntentForPackage(normalizedPackageName) ?: return false
+        return runCatching {
+            startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+    }
+
+    private fun discoverLaunchableApps(): List<VpnLaunchAppOption> {
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val launchables = packageManager.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+        val optionsByPackage = linkedMapOf<String, VpnLaunchAppOption>()
+        launchables.forEach { resolveInfo ->
+            val packageName = resolveInfo.activityInfo?.packageName?.trim().orEmpty()
+            if (packageName.isBlank()) return@forEach
+            val displayName = resolveInfo
+                .loadLabel(packageManager)
+                .toString()
+                .trim()
+                .ifBlank { packageName }
+            val existing = optionsByPackage[packageName]
+            if (existing == null || displayName.length < existing.displayName.length) {
+                optionsByPackage[packageName] = VpnLaunchAppOption(
+                    displayName = displayName,
+                    packageName = packageName
+                )
+            }
+        }
+        return optionsByPackage.values.sortedWith(
+            compareBy<VpnLaunchAppOption>(
+                { it.displayName.lowercase() },
+                { it.packageName.lowercase() }
+            )
+        )
+    }
+
+    private fun rememberActiveMainFrameOAuth(flow: OAuthPopupFlow) {
+        activeMainFrameOAuthFlow = flow
+        setOAuthThirdPartyCookiesEnabled(true)
+        refreshActiveOAuthTimeout()
+    }
+
+    private fun clearActiveMainFrameOAuth() {
+        activeMainFrameOAuthFlow = null
+        viewModel.setOAuthInFlowHost(null)
+        if (activeOAuthPopup == null) {
+            oauthFlowTimeoutMs = 0L
+            setOAuthThirdPartyCookiesEnabled(false)
+        }
+    }
+
+    /**
+     * Anti-phishing chip source: while an in-app OAuth flow is active and the current page is a
+     * non-allowlisted origin (an external/self-hosted IdP rendered in the URL-bar-less WebView),
+     * surface the host so the user can see they left the Hermes origin. The residual in-app OAuth
+     * phishing surface (a non-allowlisted authorize host is intentionally allowed in-app for OIDC)
+     * is otherwise invisible without a URL bar.
+     */
+    private fun updateOAuthInFlowHost(url: String?) {
+        val host = if (activeMainFrameOAuthFlow != null && !url.isNullOrBlank() && !urlPolicy.isAllowed(url)) {
+            UrlOrigins.hostFrom(url)
+        } else {
+            null
+        }
+        viewModel.setOAuthInFlowHost(host)
+    }
+
+    private fun refreshActiveOAuthTimeout() {
+        oauthFlowTimeoutMs = System.currentTimeMillis() + OAUTH_FLOW_TIMEOUT_MS
+    }
+
+    private fun clearActiveOAuthPopup() {
+        activeOAuthPopup = null
+        activeOAuthFlow = null
+        if (activeMainFrameOAuthFlow == null) {
+            oauthFlowTimeoutMs = 0L
+            setOAuthThirdPartyCookiesEnabled(false)
+        }
+    }
+
+    private fun setOAuthThirdPartyCookiesEnabled(enabled: Boolean) {
+        val cookies = CookieManager.getInstance()
+        cookies.setAcceptThirdPartyCookies(webView, enabled)
+        activeOAuthPopup?.let { cookies.setAcceptThirdPartyCookies(it, enabled) }
+    }
+
+    private fun destroyPopup(popup: WebView) {
+        // Idempotent: only destroy a popup still tracked as live, so the delayed orphan sweep and
+        // the navigation/cleanup paths cannot double-destroy the same WebView.
+        if (trackedPopups.remove(popup)) {
+            runCatching { popup.destroy() }
+        }
+    }
+
+    /** Cleanup OAuth state if it has timed out.
+     *
+     * OAuth flows should complete quickly. If a popup or top-level auth flow stays
+     * active longer than the timeout, clear it to prevent resource leaks.
+     */
+    private fun cleanupExpiredOAuthPopup() {
+        val hasActiveOAuth = activeOAuthPopup != null || activeMainFrameOAuthFlow != null
+        if (hasActiveOAuth && System.currentTimeMillis() > oauthFlowTimeoutMs) {
+            activeOAuthPopup?.let { destroyPopup(it) }
+            clearActiveOAuthPopup()
+            clearActiveMainFrameOAuth()
+        }
+    }
+
+    private fun queueVpnGuardedLoad(serverUrl: String, details: String) {
+        pendingVpnGuardUrl = serverUrl
+        maybeLaunchVpnForServer(serverUrl, showPrompt = true)
+        startVpnReconnectWaitLoopIfNeeded()
+        viewModel.openSettingsWithServerValidation(
+            message = "VPN is required before connecting to this Tailscale Hermes server.",
+            isError = true,
+            details = details
+        )
+    }
+
+    private fun startVpnReconnectWaitLoopIfNeeded() {
+        val targetUrl = pendingVpnGuardUrl ?: return
+        if (!shouldRequireVpnForServerUrl(targetUrl)) {
+            pendingVpnGuardUrl = null
+            return
+        }
+        if (vpnReconnectWaitJob?.isActive == true) return
+        vpnReconnectWaitJob = lifecycleScope.launch {
+            while (isActive) {
+                val probeStartedAt = SystemClock.elapsedRealtime()
+                val pendingUrl = pendingVpnGuardUrl ?: return@launch
+                if (!shouldRequireVpnForServerUrl(pendingUrl)) {
+                    pendingVpnGuardUrl = null
+                    return@launch
+                }
+                if (
+                    isVpnTransportActive() &&
+                    HermesApiClient.isServerReachable(
+                        baseUrl = pendingUrl,
+                        timeoutMs = VpnReconnectPollIntervalMs.toInt() - 100
+                    )
+                ) {
+                    pendingVpnGuardUrl = null
+                    viewModel.closeSettings()
+                    loadServerUrlWithVpnGuard(pendingUrl)
+                    notifyVpnRecoveryReadyIfBackgrounded()
+                    return@launch
+                }
+                val elapsedMs = SystemClock.elapsedRealtime() - probeStartedAt
+                delay((VpnReconnectPollIntervalMs - elapsedMs).coerceAtLeast(0L))
+            }
+        }
+    }
+
+    private fun stopVpnReconnectWaitLoop() {
+        vpnReconnectWaitJob?.cancel()
+        vpnReconnectWaitJob = null
+        tailscaleLaunchFallbackJob?.cancel()
+        tailscaleLaunchFallbackJob = null
+    }
+
+    private fun notifyVpnRecoveryReadyIfBackgrounded() {
+        if (activityVisible) return
+        val openHermesIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val openHermesPendingIntent = PendingIntent.getActivity(
+            this,
+            HermesVpnReconnectNotificationId,
+            openHermesIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, HermesNotificationChannelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Hermes reconnected")
+            .setContentText("Tailscale and your Hermes server are ready.")
+            .setContentIntent(openHermesPendingIntent)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)
+            ?.notify(HermesVpnReconnectNotificationId, notification)
+    }
+
+}

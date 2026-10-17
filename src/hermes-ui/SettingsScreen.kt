@@ -1,0 +1,1399 @@
+package com.hermeswebui.android.ui.settings
+
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.hermeswebui.android.R
+import com.hermeswebui.android.data.ServerProfile
+import com.hermeswebui.android.ui.ServerValidationUiState
+import kotlin.math.roundToInt
+
+private const val DefaultTailscalePackage = "com.tailscale.ipn"
+
+data class VpnLaunchAppOption(
+    val displayName: String,
+    val packageName: String
+)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun SettingsScreen(
+    initialServerUrl: String,
+    isConfigured: Boolean,
+    backgroundReconnectEnabled: Boolean,
+    backgroundActivityFullTextEnabled: Boolean,
+    reconnectPollIntervalSeconds: Int,
+    requireVpnForTailscaleEnabled: Boolean,
+    vpnLaunchPackageName: String,
+    vpnLaunchAppOptions: List<VpnLaunchAppOption>,
+    sseTransportEnabled: Boolean,
+    sseSupportStatus: String?,
+    debugLoggingEnabled: Boolean,
+    blockScreenshotsEnabled: Boolean,
+    appUpdateAlertsEnabled: Boolean,
+    automaticAppUpdateChecksEnabled: Boolean,
+    appUpdateChannelLabel: String,
+    appUpdateStatus: String?,
+    appUpdateReleaseUrl: String?,
+    appUpdateDownloadUrl: String?,
+    appUpdateInstallReady: Boolean,
+    appUpdateReleaseNotes: String?,
+    clientCertificateUri: String?,
+    clientCertificatePassword: String?,
+    serverValidation: ServerValidationUiState,
+    appVersionLabel: String,
+    serverProfiles: List<ServerProfile>,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSetBackgroundReconnect: (Boolean) -> Unit,
+    onSetBackgroundActivityFullTextEnabled: (Boolean) -> Unit,
+    onSetReconnectPollIntervalSeconds: (Int) -> Unit,
+    onSetRequireVpnForTailscaleEnabled: (Boolean) -> Unit,
+    onSetVpnLaunchPackageName: (String) -> Unit,
+    onSetSseTransportEnabled: (Boolean) -> Unit,
+    onCheckSseSupport: () -> Unit,
+    onCopySsePrompt: () -> Unit,
+    onSetDebugLoggingEnabled: (Boolean) -> Unit,
+    onSetBlockScreenshotsEnabled: (Boolean) -> Unit,
+    onSetAppUpdateAlertsEnabled: (Boolean) -> Unit,
+    onSetAutomaticAppUpdateChecksEnabled: (Boolean) -> Unit,
+    onSetClientCertificateConfig: (String?, String?) -> Unit,
+    onClearClientCertificateConfig: () -> Unit,
+    onCheckAppUpdates: () -> Unit,
+    onDownloadAppUpdate: () -> Unit,
+    onOpenAppUpdateRelease: () -> Unit,
+    onShareDebugLog: () -> Unit,
+    onDownloadDebugLog: () -> Unit,
+    onViewGithubIssues: () -> Unit,
+    onNewGithubIssue: () -> Unit,
+    onAddProfile: (String, String) -> Unit,
+    onDeleteProfile: (String) -> Unit,
+    onEditProfile: (String, String, String) -> Unit,
+    onSwitchProfile: (String) -> Unit,
+    onReconnectCurrentServer: () -> Unit,
+    onClearServerValidation: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BackHandler(onBack = onDismiss)
+
+    var showAddProfileDialog by remember { mutableStateOf(false) }
+    var profileToDelete by remember { mutableStateOf<ServerProfile?>(null) }
+    var profileToEdit by remember { mutableStateOf<ServerProfile?>(null) }
+    var editCurrentServerWithoutProfile by remember { mutableStateOf(false) }
+    var showVpnAppPickerDialog by remember { mutableStateOf(false) }
+    var showClientCertificateDialog by remember { mutableStateOf(false) }
+    var showAdvancedConnectionOptions by rememberSaveable { mutableStateOf(false) }
+    var clientCertificateUri by remember(clientCertificateUri, isConfigured) { mutableStateOf(clientCertificateUri ?: "") }
+    var clientCertificatePassword by remember(clientCertificatePassword) { mutableStateOf(clientCertificatePassword ?: "") }
+    var clientCertificatePickerError by remember { mutableStateOf<String?>(null) }
+    var serverUrl by remember(initialServerUrl, isConfigured) {
+        mutableStateOf(if (isConfigured) initialServerUrl else "")
+    }
+    val context = LocalContext.current
+    val clientCertificatePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val hasPersistentReadAccess = runCatching {
+                val alreadyPersisted = context.contentResolver.persistedUriPermissions.any { permission ->
+                    permission.uri == uri && permission.isReadPermission
+                }
+                if (!alreadyPersisted) {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+                true
+            }.getOrDefault(false)
+            if (hasPersistentReadAccess) {
+                clientCertificateUri = uri.toString()
+                clientCertificatePickerError = null
+            } else {
+                clientCertificatePickerError =
+                    "This document provider cannot grant lasting access. Choose the certificate from another provider."
+            }
+        }
+    }
+
+    // Derived theme colors kept local for readability
+    val bgColor = MaterialTheme.colorScheme.background          // #0D0D1A deep navy
+    val surfaceColor = MaterialTheme.colorScheme.surface         // #141425 card navy
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant // #1A1A2E list row navy
+    val primaryColor = MaterialTheme.colorScheme.primary          // #FFD700 gold
+    val onSurface = MaterialTheme.colorScheme.onSurface           // #FFF8DC cream
+    val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant // #E6E0C8 muted cream
+    val outlineVar = MaterialTheme.colorScheme.outlineVariant     // #3A3A55 subtle divider
+
+    // ── Dialogs ──────────────────────────────────────────────────────────────
+    if (showAddProfileDialog) {
+        AddServerProfileDialog(
+            existingProfiles = serverProfiles,
+            onConfirm = { name, url -> onAddProfile(name, url); showAddProfileDialog = false },
+            onDismiss = { showAddProfileDialog = false }
+        )
+    }
+    profileToEdit?.let { editing ->
+        EditProfileDialog(
+            currentName = editing.name,
+            currentUrl = editing.url,
+            onConfirm = { newName, newUrl ->
+                onEditProfile(editing.id, newName, newUrl)
+                profileToEdit = null
+            },
+            onDismiss = { profileToEdit = null }
+        )
+    }
+
+    if (editCurrentServerWithoutProfile) {
+        EditProfileDialog(
+            currentName = "Current server",
+            currentUrl = initialServerUrl,
+            onConfirm = { _, newUrl ->
+                onSave(newUrl)
+                editCurrentServerWithoutProfile = false
+            },
+            onDismiss = { editCurrentServerWithoutProfile = false }
+        )
+    }
+    profileToDelete?.let { deleting ->
+        AlertDialog(
+            onDismissRequest = { profileToDelete = null },
+            title = { Text("Delete server?") },
+            text = { Text("Remove \"${deleting.name}\" from your saved servers?") },
+            dismissButton = {
+                TextButton(onClick = { profileToDelete = null }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(onClick = { onDeleteProfile(deleting.id); profileToDelete = null }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        )
+    }
+    if (showVpnAppPickerDialog) {
+        VpnAppPickerDialog(
+            apps = vpnLaunchAppOptions,
+            selectedPackageName = vpnLaunchPackageName,
+            onSelect = { selectedPackageName ->
+                onSetVpnLaunchPackageName(selectedPackageName)
+                showVpnAppPickerDialog = false
+            },
+            onDismiss = { showVpnAppPickerDialog = false }
+        )
+    }
+    if (showClientCertificateDialog) {
+        ClientCertificateDialog(
+            certificateUri = clientCertificateUri,
+            certificatePassword = clientCertificatePassword,
+            pickerError = clientCertificatePickerError,
+            onCertificatePasswordChange = { clientCertificatePassword = it },
+            onChooseCertificate = {
+                clientCertificatePickerError = null
+                clientCertificatePicker.launch(arrayOf("*/*"))
+            },
+            onSave = {
+                onSetClientCertificateConfig(
+                    clientCertificateUri.trim().ifBlank { null },
+                    clientCertificatePassword.ifBlank { null }
+                )
+                showClientCertificateDialog = false
+            },
+            onClear = {
+                clientCertificateUri = ""
+                clientCertificatePassword = ""
+                onClearClientCertificateConfig()
+                showClientCertificateDialog = false
+            },
+            onDismiss = { showClientCertificateDialog = false }
+        )
+    }
+
+    // ── Full-screen settings surface ─────────────────────────────────────────
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = bgColor,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Settings",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = onSurface
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = primaryColor   // gold back arrow = matches app's interactive accent
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = surfaceColor,          // #141425 — same as card/surface
+                    scrolledContainerColor = surfaceColor,
+                    titleContentColor = onSurface,
+                    navigationIconContentColor = primaryColor,
+                    actionIconContentColor = primaryColor
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(bgColor)
+                .verticalScroll(rememberScrollState())
+                .padding(paddingValues)
+        ) {
+            if (!isConfigured) {
+                // ── First-run: connect ────────────────────────────────────
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "Connect to Hermes",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = primaryColor
+                    )
+                    Text(
+                        text = "Enter your Hermes server URL to get started.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = onSurfaceVar
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = serverUrl,
+                        onValueChange = {
+                            serverUrl = it
+                            onClearServerValidation()
+                        },
+                        singleLine = true,
+                        label = { Text("Hermes server URL") },
+                        placeholder = { Text("https://hermes.example.com") },
+                        supportingText = { Text("HTTP or HTTPS. Host is automatically allowlisted.") }
+                    )
+                    ServerValidationStatus(serverValidation = serverValidation)
+                    Button(
+                        onClick = { onSave(serverUrl.trim()) },
+                        enabled = serverUrl.isNotBlank() && !serverValidation.isChecking,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = primaryColor,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Text(
+                            if (serverValidation.isChecking) "Checking server..." else "Connect",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ── Servers ───────────────────────────────────────────────
+                SectionHeader("Servers")
+
+                val activeProfile = serverProfiles.firstOrNull { profile ->
+                    profile.url.trimEnd('/').equals(initialServerUrl.trimEnd('/'), ignoreCase = true)
+                } ?: serverProfiles.firstOrNull { it.isActive }
+                val sortedProfiles = listOfNotNull(activeProfile) +
+                    serverProfiles.filter { it.id != activeProfile?.id }
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(surfaceColor)
+                        .fillMaxWidth()
+                ) {
+                    Column {
+                        if (sortedProfiles.isEmpty()) {
+                            ListItem(
+                                headlineContent = { Text("Current server", maxLines = 1, color = onSurface) },
+                                supportingContent = {
+                                    Text(
+                                        initialServerUrl,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = onSurfaceVar
+                                    )
+                                },
+                                trailingContent = { ServerCurrentBadge() },
+                                colors = ListItemDefaults.colors(containerColor = surfaceVariant),
+                                modifier = Modifier.combinedClickable(
+                                    onClick = onReconnectCurrentServer,
+                                    onLongClick = { editCurrentServerWithoutProfile = true }
+                                )
+                            )
+                        } else {
+                            sortedProfiles.forEachIndexed { index, profile ->
+                                val isCurrent = profile.id == activeProfile?.id
+                                ListItem(
+                                    headlineContent = {
+                                        Text(
+                                            profile.name,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (isCurrent) primaryColor else onSurface
+                                        )
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            profile.url,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = onSurfaceVar
+                                        )
+                                    },
+                                    trailingContent = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (isCurrent) ServerCurrentBadge()
+                                            IconButton(onClick = { profileToDelete = profile }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete \"${profile.name}\"",
+                                                    tint = onSurfaceVar
+                                                )
+                                            }
+                                        }
+                                    },
+                                    colors = ListItemDefaults.colors(containerColor = surfaceVariant),
+                                    modifier = Modifier
+                                        .combinedClickable(
+                                            onClick = {
+                                                if (isCurrent) {
+                                                    onReconnectCurrentServer()
+                                                } else {
+                                                    onSwitchProfile(profile.id)
+                                                }
+                                            },
+                                            onLongClick = { profileToEdit = profile }
+                                        )
+                                        .alpha(if (isCurrent) 1f else 0.85f)
+                                )
+                                if (index < sortedProfiles.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        color = outlineVar.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Add server row
+                        HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
+                        ListItem(
+                            headlineContent = {
+                                Text("Add server", color = primaryColor, fontWeight = FontWeight.Medium)
+                            },
+                            leadingContent = {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = primaryColor)
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable { showAddProfileDialog = true }
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Tap to check connection  •  Long-press to edit",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = onSurfaceVar.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                )
+                if (serverValidation.isChecking || !serverValidation.message.isNullOrBlank()) {
+                    ServerValidationStatus(
+                        serverValidation = serverValidation,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ── Application ───────────────────────────────────────────
+                SectionHeader("Application")
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(surfaceColor)
+                        .fillMaxWidth()
+                ) {
+                    Column {
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Background activity notification",
+                                    color = onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    "Show the latest safe Hermes session activity while the app is backgrounded",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = backgroundReconnectEnabled,
+                                    onCheckedChange = onSetBackgroundReconnect,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = primaryColor,
+                                        uncheckedThumbColor = onSurfaceVar,
+                                        uncheckedTrackColor = surfaceVariant
+                                    )
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable {
+                                onSetBackgroundReconnect(!backgroundReconnectEnabled)
+                            }
+                        )
+
+                        HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
+
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Show full activity text on lock screen",
+                                    color = onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    "Off keeps the lock screen redacted with a generic Hermes status message.",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = backgroundActivityFullTextEnabled,
+                                    onCheckedChange = onSetBackgroundActivityFullTextEnabled,
+                                    enabled = backgroundReconnectEnabled,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = primaryColor,
+                                        uncheckedThumbColor = onSurfaceVar,
+                                        uncheckedTrackColor = surfaceVariant
+                                    )
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier
+                                .alpha(if (backgroundReconnectEnabled) 1f else 0.55f)
+                                .clickable(enabled = backgroundReconnectEnabled) {
+                                    onSetBackgroundActivityFullTextEnabled(!backgroundActivityFullTextEnabled)
+                                }
+                        )
+
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                UpdatesSettingsSection(
+                    appUpdateAlertsEnabled = appUpdateAlertsEnabled,
+                    automaticAppUpdateChecksEnabled = automaticAppUpdateChecksEnabled,
+                    appUpdateChannelLabel = appUpdateChannelLabel,
+                    appUpdateStatus = appUpdateStatus,
+                    appUpdateReleaseUrl = appUpdateReleaseUrl,
+                    appUpdateDownloadUrl = appUpdateDownloadUrl,
+                    appUpdateInstallReady = appUpdateInstallReady,
+                    appUpdateReleaseNotes = appUpdateReleaseNotes,
+                    onSetAppUpdateAlertsEnabled = onSetAppUpdateAlertsEnabled,
+                    onSetAutomaticAppUpdateChecksEnabled = onSetAutomaticAppUpdateChecksEnabled,
+                    onCheckAppUpdates = onCheckAppUpdates,
+                    onDownloadAppUpdate = onDownloadAppUpdate,
+                    onOpenAppUpdateRelease = onOpenAppUpdateRelease
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ── Connection ────────────────────────────────────────────
+                SectionHeader("Connection")
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(surfaceColor)
+                        .fillMaxWidth()
+                ) {
+                    Column {
+
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Require VPN for Tailscale servers",
+                                    color = onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    "When the server URL looks like Tailscale (.ts.net or 100.64.0.0/10), Hermes only connects while a VPN is active and will try opening Tailscale/VPN settings first.",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = requireVpnForTailscaleEnabled,
+                                    onCheckedChange = onSetRequireVpnForTailscaleEnabled,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = primaryColor,
+                                        uncheckedThumbColor = onSurfaceVar,
+                                        uncheckedTrackColor = surfaceVariant
+                                    )
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable {
+                                onSetRequireVpnForTailscaleEnabled(!requireVpnForTailscaleEnabled)
+                            }
+                        )
+
+                        if (requireVpnForTailscaleEnabled) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val selectedVpnApp = vpnLaunchAppOptions.firstOrNull {
+                                    it.packageName.equals(vpnLaunchPackageName, ignoreCase = true)
+                                }
+                                Text(
+                                    text = "Preferred VPN app",
+                                    color = onSurface,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                OutlinedTextField(
+                                    value = vpnLaunchPackageName,
+                                    onValueChange = onSetVpnLaunchPackageName,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = { Text("Package name") }
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showVpnAppPickerDialog = true },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Choose app")
+                                    }
+                                    TextButton(
+                                        onClick = { onSetVpnLaunchPackageName(DefaultTailscalePackage) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Use Tailscale")
+                                    }
+                                }
+                                if (selectedVpnApp != null) {
+                                    Text(
+                                        text = "Selected: ${selectedVpnApp.displayName}",
+                                        color = onSurfaceVar.copy(alpha = 0.88f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = outlineVar.copy(alpha = 0.5f))
+
+                        ListItem(
+                            headlineContent = {
+                                Text("Advanced connection options", fontWeight = FontWeight.Medium)
+                            },
+                            supportingContent = {
+                                Text(
+                                    "SSE transport, capability checks, and reconnect timing",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Icon(
+                                    imageVector = if (showAdvancedConnectionOptions) {
+                                        Icons.Default.ExpandLess
+                                    } else {
+                                        Icons.Default.ExpandMore
+                                    },
+                                    contentDescription = if (showAdvancedConnectionOptions) {
+                                        "Collapse advanced connection options"
+                                    } else {
+                                        "Expand advanced connection options"
+                                    },
+                                    tint = onSurfaceVar
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable {
+                                showAdvancedConnectionOptions = !showAdvancedConnectionOptions
+                            }
+                        )
+
+                        if (showAdvancedConnectionOptions) Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Reconnect polling interval",
+                                color = onSurface,
+                                fontWeight = FontWeight.Medium,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = pluralStringResource(
+                                    R.plurals.reconnect_settings_polling_interval,
+                                    reconnectPollIntervalSeconds,
+                                    reconnectPollIntervalSeconds
+                                ),
+                                color = onSurfaceVar,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Slider(
+                                value = reconnectPollIntervalSeconds.toFloat(),
+                                onValueChange = { value ->
+                                    onSetReconnectPollIntervalSeconds(value.roundToInt())
+                                },
+                                valueRange = 1f..10f,
+                                steps = 8,
+                                colors = androidx.compose.material3.SliderDefaults.colors(
+                                    thumbColor = primaryColor,
+                                    activeTrackColor = primaryColor,
+                                    inactiveTrackColor = surfaceVariant
+                                )
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = { onSetReconnectPollIntervalSeconds(1) }) {
+                                    Text("Reset to 1s")
+                                }
+                            }
+                            Text(
+                                text = "Used for reconnect fallback polling when Hermes is recovering after a disconnect.",
+                                color = onSurfaceVar.copy(alpha = 0.75f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                text = "Recommended: 1-3 seconds for quick recovery.",
+                                color = onSurfaceVar.copy(alpha = 0.72f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            if (reconnectPollIntervalSeconds >= 6) {
+                                Text(
+                                    text = "Higher intervals reduce checks but may delay reconnect updates.",
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            HorizontalDivider(color = outlineVar.copy(alpha = 0.35f))
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = "Use SSE transport",
+                                        color = onSurface,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        text = "Uses the persistent session stream for background activity updates, with reconnect polling as a fallback.",
+                                        color = onSurfaceVar,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = sseTransportEnabled,
+                                        onCheckedChange = onSetSseTransportEnabled,
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                            checkedTrackColor = primaryColor,
+                                            uncheckedThumbColor = onSurfaceVar,
+                                            uncheckedTrackColor = surfaceVariant
+                                        )
+                                    )
+                                },
+                                colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                                modifier = Modifier.clickable {
+                                    onSetSseTransportEnabled(!sseTransportEnabled)
+                                }
+                            )
+                            Text(
+                                text = "Android uses /api/session/stream for the active authenticated session, the same persistent stream used by Hermes WebUI. The optional gateway check reports approval and notification extras; it does not disable session streaming by itself.",
+                                color = onSurfaceVar.copy(alpha = 0.72f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onCheckSseSupport,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Check SSE support now")
+                                }
+                                OutlinedButton(
+                                    onClick = onCopySsePrompt,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Copy enable prompt")
+                                }
+                            }
+                            if (!sseSupportStatus.isNullOrBlank()) {
+                                val statusColor = when {
+                                    sseSupportStatus.startsWith("✅") -> Color(0xFF4CAF50)
+                                    sseSupportStatus.startsWith("Info:") -> onSurfaceVar.copy(alpha = 0.9f)
+                                    sseSupportStatus.startsWith("❔") -> onSurfaceVar.copy(alpha = 0.82f)
+                                    sseSupportStatus.startsWith("❌") -> MaterialTheme.colorScheme.error
+                                    else -> onSurfaceVar.copy(alpha = 0.72f)
+                                }
+                                Text(
+                                    text = sseSupportStatus,
+                                    color = statusColor,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ── Privacy ───────────────────────────────────────────────
+                SectionHeader("Privacy")
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(surfaceColor)
+                        .fillMaxWidth()
+                ) {
+                    ListItem(
+                        headlineContent = {
+                            Text("Block screenshots", fontWeight = FontWeight.Medium)
+                        },
+                        supportingContent = {
+                            Text(
+                                "Prevent screenshots and screen recording, and hide app content in the recent-apps switcher.",
+                                color = onSurfaceVar,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = blockScreenshotsEnabled,
+                                onCheckedChange = onSetBlockScreenshotsEnabled,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    uncheckedThumbColor = onSurfaceVar,
+                                    uncheckedTrackColor = surfaceVariant
+                                )
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                        modifier = Modifier.clickable {
+                            onSetBlockScreenshotsEnabled(!blockScreenshotsEnabled)
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ── Troubleshooting ────────────────────────────────────────
+                SectionHeader("Troubleshooting")
+
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(surfaceColor)
+                        .fillMaxWidth()
+                ) {
+                    Column {
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Capture debug logs",
+                                    color = onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    "Captures app, WebView/system logs, and device/server metadata while running. Use Stop on the notification to end capture.",
+                                    color = onSurfaceVar,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = debugLoggingEnabled,
+                                    onCheckedChange = onSetDebugLoggingEnabled,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                        checkedTrackColor = primaryColor,
+                                        uncheckedThumbColor = onSurfaceVar,
+                                        uncheckedTrackColor = surfaceVariant
+                                    )
+                                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = surfaceColor),
+                            modifier = Modifier.clickable {
+                                onSetDebugLoggingEnabled(!debugLoggingEnabled)
+                            }
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onShareDebugLog,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null)
+                                    Text("Share log", modifier = Modifier.padding(start = 8.dp))
+                                }
+                                OutlinedButton(
+                                    onClick = onDownloadDebugLog,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null)
+                                    Text("Save log", modifier = Modifier.padding(start = 8.dp))
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onViewGithubIssues,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null)
+                                Text("View existing issues", modifier = Modifier.padding(start = 8.dp))
+                            }
+                            Button(
+                                onClick = onNewGithubIssue,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.BugReport, contentDescription = null)
+                                Text("Report an issue", modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                AdvancedSettingsSection(
+                    clientCertificateConfigured = clientCertificateUri.isNotBlank(),
+                    onOpenClientCertificate = { showClientCertificateDialog = true }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                AboutSettingsSection(
+                    appVersionLabel = appVersionLabel,
+                    appUpdateChannelLabel = appUpdateChannelLabel
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+
+            if (!isConfigured) {
+                Text(
+                    text = appVersionLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = onSurfaceVar.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ClientCertificateDialog(
+    certificateUri: String,
+    certificatePassword: String,
+    pickerError: String?,
+    onCertificatePasswordChange: (String) -> Unit,
+    onChooseCertificate: () -> Unit,
+    onSave: () -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Client certificate") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Use a PKCS#12 (.pfx/.p12) certificate for Hermes servers protected by mutual TLS.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = certificateUri,
+                    onValueChange = {},
+                    modifier = Modifier.fillMaxWidth(),
+                    readOnly = true,
+                    singleLine = true,
+                    label = { Text("Certificate file") },
+                    placeholder = { Text("No certificate selected") }
+                )
+                OutlinedButton(onClick = onChooseCertificate, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (certificateUri.isBlank()) "Choose certificate" else "Choose another certificate")
+                }
+                if (!pickerError.isNullOrBlank()) {
+                    Text(
+                        text = pickerError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                OutlinedTextField(
+                    value = certificatePassword,
+                    onValueChange = onCertificatePasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Certificate password") },
+                    placeholder = { Text("Optional") },
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) {
+                                    Icons.Default.VisibilityOff
+                                } else {
+                                    Icons.Default.Visibility
+                                },
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                            )
+                        }
+                    }
+                )
+                if (certificateUri.isNotBlank()) {
+                    OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
+                        Text("Remove certificate", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        confirmButton = {
+            Button(onClick = onSave, enabled = certificateUri.isNotBlank()) {
+                Text("Save")
+            }
+        }
+    )
+}
+
+@Composable
+private fun VpnAppPickerDialog(
+    apps: List<VpnLaunchAppOption>,
+    selectedPackageName: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim().lowercase()
+    val filteredApps = remember(apps, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            apps
+        } else {
+            apps.filter { app ->
+                app.displayName.contains(normalizedQuery, ignoreCase = true) ||
+                    app.packageName.contains(normalizedQuery, ignoreCase = true)
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose VPN app") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search by app name or package") }
+                )
+                if (filteredApps.isEmpty()) {
+                    Text(
+                        text = "No matching apps found.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                    ) {
+                        itemsIndexed(
+                            items = filteredApps,
+                            key = { _, app -> app.packageName }
+                        ) { index, app ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = app.displayName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        text = app.packageName,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                },
+                                trailingContent = {
+                                    if (app.packageName.equals(selectedPackageName, ignoreCase = true)) {
+                                        Text(
+                                            text = "Selected",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier = Modifier.clickable { onSelect(app.packageName) }
+                            )
+                            if (index < filteredApps.lastIndex) {
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
+@Composable
+private fun ServerValidationStatus(
+    serverValidation: ServerValidationUiState,
+    modifier: Modifier = Modifier
+) {
+    val message = serverValidation.message
+    if (!serverValidation.isChecking && message.isNullOrBlank()) return
+
+    val containerColor = if (serverValidation.isError) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+    }
+    val contentColor = if (serverValidation.isError) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(containerColor)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        if (serverValidation.isChecking) {
+            CircularProgressIndicator(
+                modifier = Modifier.height(18.dp),
+                strokeWidth = 2.dp,
+                color = contentColor
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = message ?: "Checking Hermes server readiness...",
+                color = contentColor,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (serverValidation.isError) FontWeight.Medium else FontWeight.Normal
+            )
+            val details = serverValidation.details
+            if (!details.isNullOrBlank()) {
+                Text(
+                    text = details,
+                    color = contentColor.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SectionHeader(title: String) {
+    Text(
+        text = title.uppercase(),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+        letterSpacing = androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Sp),
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp)
+    )
+}
+
+@Composable
+internal fun ServerCurrentBadge() {
+    SuggestionChip(
+        onClick = {},
+        label = { Text("Current", style = MaterialTheme.typography.labelSmall) },
+        colors = SuggestionChipDefaults.suggestionChipColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    )
+}
+
+@Composable
+internal fun EditProfileDialog(
+    currentName: String,
+    currentUrl: String,
+    onConfirm: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember(currentName) { mutableStateOf(currentName) }
+    var url by remember(currentUrl) { mutableStateOf(currentUrl) }
+    val isValidUrl = url.isNotBlank() && (url.startsWith("http://") || url.startsWith("https://"))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit server") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Server name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("Server URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text(
+                            if (!isValidUrl && url.isNotBlank()) "Must start with http:// or https://"
+                            else "HTTP or HTTPS"
+                        )
+                    },
+                    isError = !isValidUrl && url.isNotBlank()
+                )
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            Button(
+                onClick = { if (name.isNotBlank() && isValidUrl) onConfirm(name, url) },
+                enabled = name.isNotBlank() && isValidUrl
+            ) { Text("Save") }
+        }
+    )
+}
+
+@Composable
+internal fun AddServerProfileDialog(
+    existingProfiles: List<ServerProfile>,
+    onConfirm: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var profileName by remember { mutableStateOf("") }
+    var profileUrl by remember { mutableStateOf("") }
+    val trimmedName = profileName.trim()
+    val trimmedUrl = profileUrl.trim()
+    val normalizedUrl = trimmedUrl.trimEnd('/').lowercase()
+    val isValidUrl = trimmedUrl.isNotBlank() &&
+        (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://"))
+    val isDuplicateUrl = existingProfiles.any {
+        it.url.trim().trimEnd('/').lowercase() == normalizedUrl
+    }
+    val isDuplicateName = trimmedName.isNotBlank() &&
+        existingProfiles.any { it.name.trim().equals(trimmedName, ignoreCase = true) }
+    val canSubmit = isValidUrl && !isDuplicateUrl && !isDuplicateName
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add server") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = profileUrl,
+                    onValueChange = { profileUrl = it },
+                    label = { Text("Server URL") },
+                    placeholder = { Text("https://hermes.example.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text(
+                            if (!isValidUrl && trimmedUrl.isNotBlank()) "Must start with http:// or https://"
+                            else if (isDuplicateUrl) "A server with this URL already exists"
+                            else "HTTP or HTTPS"
+                        )
+                    },
+                    isError = (!isValidUrl && trimmedUrl.isNotBlank()) || isDuplicateUrl
+                )
+                OutlinedTextField(
+                    value = profileName,
+                    onValueChange = { profileName = it },
+                    label = { Text("Server name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text(
+                            if (isDuplicateName) "A server with this name already exists"
+                            else "Optional friendly name"
+                        )
+                    },
+                    isError = isDuplicateName
+                )
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            Button(
+                onClick = { if (canSubmit) { onConfirm(trimmedName.ifBlank { trimmedUrl }, trimmedUrl); onDismiss() } },
+                enabled = canSubmit
+            ) { Text("Add") }
+        }
+    )
+}
